@@ -1,1 +1,1 @@
-# ai-big5-phishing-susceptibiliy
+# ai-big5-phishing-susceptibility
