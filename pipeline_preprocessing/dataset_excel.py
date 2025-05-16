@@ -11,10 +11,9 @@ import os
 import pandas as pd
 from datetime import datetime
 from pipeline_preprocessing.data_processor_base import DataProcessorBase
-from config import DATASET_PATH
+from config import DATASET_PATH, SCALING_TYPE
 
 logger = logging.getLogger(__name__)
-
 
 class ExcelDataProcessor(DataProcessorBase):
     """
@@ -26,10 +25,26 @@ class ExcelDataProcessor(DataProcessorBase):
         Inizializza il data processor di dati Excel.
         """
         super().__init__()
-
         self.source_data = DATASET_PATH
+        self.scaling_type = SCALING_TYPE
 
-        # Definizione delle colonne per il calcolo dell'indice di criticità
+        # Statistiche del dataset
+        self.dataset_stats = {
+            'delta': {
+                'min': float('inf'),
+                'max': float('-inf'),
+                'mean': 0.0,
+                'std': 0.0
+            },
+            'ocean': {
+                'min': float('inf'),
+                'max': float('-inf'),
+                'mean': 0.0,
+                'std': 0.0
+            }
+        }
+
+        # Definizione colonne
         self.PERSUASION_COLUMNS = [
             'Social_Proof_Delta_Install',
             'Likeability_Delta_Install',
@@ -39,20 +54,97 @@ class ExcelDataProcessor(DataProcessorBase):
             'Scarcity_Delta_Install'
         ]
         
-        # Definizione delle colonne di base per l'estrazione
+        self.OCEAN_COLUMNS = [
+            'Extraversion', 
+            'Agreeableness', 
+            'Conscientiousness', 
+            'Neuroticism', 
+            'Openness'
+        ]
+        
         self.EXTRACTION_COLUMNS = [
-            'Group', 'Age', 'Gender',
-            'Extraversion', 'Agreeableness', 'Conscientiousness', 'Neuroticism', 'Openness'
-        ] + self.PERSUASION_COLUMNS        
-
-        self.dataset_delta_min = float('inf')
-        self.dataset_delta_max = float('-inf')
-
-        self.dataset_ocean_min = float('inf')
-        self.dataset_ocean_max = float('-inf')
+            'Group', 'Age', 'Gender'
+        ] + self.OCEAN_COLUMNS + self.PERSUASION_COLUMNS
             
-        logger.info(f"Inizializzato data processor Excel")
+        logger.info(f"Inizializzato data processor Excel con scaling {SCALING_TYPE}")
     
+    def scale_value(self, value, feature_type='ocean'):
+        """
+        Applica lo scaling specificato al valore.
+        
+        Args:
+            value (float): Valore da scalare
+            feature_type (str): Tipo di feature ('ocean' o 'delta')
+            
+        Returns:
+            float: Valore scalato
+        """
+        try:
+            if pd.isna(value):
+                return 0.0
+                
+            value = float(value)
+            dataset_stats = self.dataset_stats[feature_type]
+
+            if self.scaling_type == "min_max":
+                min_val = dataset_stats['min']
+                max_val = dataset_stats['max']
+                if max_val == min_val:
+                    return 0.0
+                return (value - min_val) / (max_val - min_val)
+            
+            elif self.scaling_type == "standard":
+                mean = dataset_stats['mean']
+                std = dataset_stats['std']
+                if std == 0:
+                    return 0.0
+                return (value - mean) / std
+            
+            else:
+                logger.warning(f"Tipo di scaling non supportato: {self.scaling_type}")
+                return value
+                
+        except Exception as e:
+            logger.error(f"Errore durante lo scaling del valore {value}: {e}")
+            return 0.0
+
+    def calculate_dataset_statistics(self, df):
+        """
+        Calcola le statistiche del dataset necessarie per lo scaling.
+        
+        Args:
+            df (pandas.DataFrame): DataFrame con i dati
+        """
+        try:
+            # Statistiche per le colonne di persuasione
+            persuasion_data = df[self.PERSUASION_COLUMNS].values.flatten()
+            persuasion_data = persuasion_data[~pd.isna(persuasion_data)]
+            
+            self.dataset_stats['delta'].update({
+                'min': float(persuasion_data.min()),
+                'max': float(persuasion_data.max()),
+                'mean': float(persuasion_data.mean()),
+                'std': float(persuasion_data.std())
+            })
+            
+            # Statistiche per le colonne OCEAN
+            ocean_data = df[self.OCEAN_COLUMNS].values.flatten()
+            ocean_data = ocean_data[~pd.isna(ocean_data)]
+            
+            self.dataset_stats['ocean'].update({
+                'min': float(ocean_data.min()),
+                'max': float(ocean_data.max()),
+                'mean': float(ocean_data.mean()),
+                'std': float(ocean_data.std())
+            })
+            
+            logger.info("Statistiche del dataset calcolate con successo")
+            logger.debug(f"Statistiche: {self.dataset_stats}")
+            
+        except Exception as e:
+            logger.error(f"Errore nel calcolo delle statistiche del dataset: {e}")
+            raise
+
     def calculate_criticality_index(self, row):
         """
         Calcola l'indice di criticità per una riga di dati.
@@ -63,39 +155,26 @@ class ExcelDataProcessor(DataProcessorBase):
         Returns:
             float: Indice di criticità calcolato.
         """
-        sum_crit_columns = 0.0
-        n_crit_columns = 0
-        
-        for column in self.PERSUASION_COLUMNS:
-            if column in row and pd.notna(row[column]):
-                sum_crit_columns += float(row[column])
-                n_crit_columns += 1
-        
-        criticality_index = sum_crit_columns / n_crit_columns if n_crit_columns > 0 else 0
-
-        normalized_index = self.min_max_scaling(
-            value=criticality_index, 
-            min_val=self.dataset_delta_min, 
-            max_val=self.dataset_delta_max
-        )
-        
-        return float(round(normalized_index, 2))
-    
-    def min_max_scaling(self, value, min_val, max_val):
-        """
-        Applica il min-max scaling per normalizzare un valore in un intervallo target.
-        
-        Args:
-            value (float): Il valore da normalizzare
-            min_val (float): Il valore minimo nell'intervallo originale
-            max_val (float): Il valore massimo nell'intervallo originale
+        try:
+            values = []
+            for column in self.PERSUASION_COLUMNS:
+                if column in row and pd.notna(row[column]):
+                    values.append(float(row[column]))
             
-        Returns:
-            float: Il valore normalizzato nell'intervallo target
-        """
-        normalized = (value - min_val) / (max_val - min_val)
-    
-        return normalized
+            if not values:
+                return 0.0
+            
+            # Media dei valori prima dello scaling
+            raw_index = sum(values) / len(values)
+            
+            # Applica lo scaling all'indice di criticità
+            scaled_index = self.scale_value(raw_index, 'delta')
+            
+            return float(round(scaled_index, 4))
+            
+        except Exception as e:
+            logger.error(f"Errore nel calcolo dell'indice di criticità: {e}")
+            return 0.0
     
     def read_excel(self):
         """
@@ -104,43 +183,30 @@ class ExcelDataProcessor(DataProcessorBase):
         Returns:
             df (pandas.DataFrame): DataFrame contenente i dati letti dal file Excel.
         """
-        if isinstance(self.source_data, str):
-            if not os.path.exists(self.source_data):
-                raise FileNotFoundError(f"File Excel non trovato: {self.source_data}")
-            df = pd.read_excel(self.source_data)
-            logger.info(f"Caricato file Excel: {self.source_data} con {len(df)} righe")
-            return df
-        else:
-            raise ValueError("source_data deve essere un percorso file di un dataset")
-
-    def calculate_min_max(self, df):
-        """
-        Calcola i valori minimi e massimi delle colonne di persuasione e dei tratti di personalità.
-
-        Args:
-            df (pandas.DataFrame): DataFrame contenente i dati letti dal file Excel.
-        """
-        OCEAN_COLUMNS = [
-            'Extraversion', 'Agreeableness', 'Conscientiousness', 'Neuroticism', 'Openness'
-        ]
-
-        for col in self.PERSUASION_COLUMNS:
-            if col in df.columns:
-                col_min = df[col].min()
-                col_max = df[col].max()
-                if pd.notna(col_min) and col_min < self.dataset_delta_min:
-                    self.dataset_delta_min = col_min
-                if pd.notna(col_max) and col_max > self.dataset_delta_max:
-                    self.dataset_delta_max = col_max
-
-        for col in OCEAN_COLUMNS:
-            if col in df.columns:
-                col_min = df[col].min()
-                col_max = df[col].max()
-                if pd.notna(col_min) and col_min < self.dataset_ocean_min:
-                    self.dataset_ocean_min = col_min
-                if pd.notna(col_max) and col_max > self.dataset_ocean_max:
-                    self.dataset_ocean_max = col_max
+        try:
+            if isinstance(self.source_data, str):
+                if not os.path.exists(self.source_data):
+                    raise FileNotFoundError(f"File Excel non trovato: {self.source_data}")
+                
+                if os.path.isdir(self.source_data):
+                    excel_files = [f for f in os.listdir(self.source_data) if f.endswith('.xlsx')]
+                    if not excel_files:
+                        raise FileNotFoundError(f"Nessun file Excel trovato nella directory: {self.source_data}")
+                    
+                    # Usa il primo file Excel trovato
+                    file_path = os.path.join(self.source_data, excel_files[0])
+                    logger.info(f"Utilizzando il file Excel trovato nella directory: {file_path}")
+                else:
+                    file_path = self.source_data
+                
+                df = pd.read_excel(file_path)
+                logger.info(f"Caricato file Excel: {file_path} con {len(df)} righe")
+                return df
+            else:
+                raise ValueError("source_data deve essere un percorso file di un dataset")
+        except Exception as e:
+            logger.error(f"Errore nella lettura del file Excel: {self.source_data}, errore: {e}")
+            raise
 
     def build_records(self, df):
         """
@@ -153,51 +219,34 @@ class ExcelDataProcessor(DataProcessorBase):
             list: Lista di record elaborati pronti per l'inserimento in MongoDB.
         """
         processed_data = []
-        # Filtra le righe per Group (country) diverso da 'Arab'
         df = df[df['Group'] != 'Arab']
 
         for _, row in df.iterrows():
-            record = {
-                'source': 'excel_dataset',
-                'demographic_traits': {
-                    'country': row.get('Group', ''),
-                    'age': int(row.get('Age', 0)) if pd.notna(row.get('Age', 0)) else 0,
-                    'gender': row.get('Gender', ''),
-                },
-                'personality_traits': {
-                    'extraversion': self.min_max_scaling(
-                        value=float(row.get('Extraversion', 0)) if pd.notna(row.get('Extraversion', 0)) else 0,
-                        min_val=self.dataset_ocean_min,
-                        max_val=self.dataset_ocean_max
-                    ),
-                    'agreeableness': self.min_max_scaling(
-                        value=float(row.get('Agreeableness', 0)) if pd.notna(row.get('Agreeableness', 0)) else 0,
-                        min_val=self.dataset_ocean_min,
-                        max_val=self.dataset_ocean_max
-                    ),
-                    'conscientiousness': self.min_max_scaling(
-                        value=float(row.get('Conscientiousness', 0)) if pd.notna(row.get('Conscientiousness', 0)) else 0,
-                        min_val=self.dataset_ocean_min,
-                        max_val=self.dataset_ocean_max
-                    ),
-                    'neuroticism': self.min_max_scaling(
-                        value=float(row.get('Neuroticism', 0)) if pd.notna(row.get('Neuroticism', 0)) else 0,
-                        min_val=self.dataset_ocean_min,
-                        max_val=self.dataset_ocean_max
-                    ),
-                    'openness': self.min_max_scaling(
-                        value=float(row.get('Openness', 0)) if pd.notna(row.get('Openness', 0)) else 0,
-                        min_val=self.dataset_ocean_min,
-                        max_val=self.dataset_ocean_max
-                    ),
-                },
-                'criticality_index': float(self.calculate_criticality_index(row)),
-                'survey_raw_data': {
-                    col: float(row.get(col, 0)) if pd.notna(row.get(col, 0)) else 0
-                    for col in self.PERSUASION_COLUMNS
+            try:
+                record = {
+                    'source': 'excel_dataset',
+                    'demographic_traits': {
+                        'country': row.get('Group', ''),
+                        'age': int(row.get('Age', 0)) if pd.notna(row.get('Age', 0)) else 0,
+                        'gender': row.get('Gender', ''),
+                    },
+                    'personality_traits': {
+                        trait.lower(): self.scale_value(
+                            row.get(trait, 0), 
+                            'ocean'
+                        ) for trait in self.OCEAN_COLUMNS
+                    },
+                    'criticality_index': self.calculate_criticality_index(row),
+                    'survey_raw_data': {
+                        col: float(row.get(col, 0)) if pd.notna(row.get(col, 0)) else 0
+                        for col in self.PERSUASION_COLUMNS
+                    }
                 }
-            }
-            processed_data.append(record)
+                processed_data.append(record)
+            except Exception as e:
+                logger.error(f"Errore nell'elaborazione della riga {_}: {e}")
+                continue
+
         logger.info(f"Elaborati {len(processed_data)} record dal file Excel")
         return processed_data
 
@@ -210,7 +259,7 @@ class ExcelDataProcessor(DataProcessorBase):
         """
         try:
             df = self.read_excel()
-            self.calculate_min_max(df)
+            self.calculate_dataset_statistics(df)
             processed_data = self.build_records(df)
         except Exception as e:
             logger.error(f"Errore durante l'elaborazione del file Excel: {e}", exc_info=True)

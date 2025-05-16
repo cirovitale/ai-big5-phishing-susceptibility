@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - MONGODB_URI=${MONGODB_URI}
+      - MONGODB_URI_USER=${MONGODB_URI_USER}
+      - MONGODB_URI_PASSWORD=${MONGODB_URI_PASSWORD}
+      - MONGODB_DB=${MONGODB_DB}
+      - MONGODB_COLLECTION_DATASET=${MONGODB_COLLECTION_DATASET}
+      - MONGODB_COLLECTION_INFERENCE=${MONGODB_COLLECTION_INFERENCE}
+      - DATASET_PATH=${DATASET_PATH}
+      - CRITICALITY_THRESHOLD=${CRITICALITY_THRESHOLD}
+      - SCALING_TYPE=${SCALING_TYPE}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./dataset:/app/dataset
+      - ./logs:/logs
+    depends_on:
+      - mongodb
+    restart: always
+
+  mongodb:
+    image: mongo
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGODB_URI_USER}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_URI_PASSWORD}
+    command: ["mongod"]
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:

@@ -9,18 +9,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Google API
-SCOPES = ['https://www.googleapis.com/auth/forms.readonly']
-GOOGLE_FORM_ID = os.getenv('GOOGLE_FORM_ID')
-GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE')
-
 # Dataset Preprocessing
 DATASET_PATH = os.getenv('DATASET_PATH')
+# DATASET_PATH = os.path.join(dataset_dir, 'Dataset.xlsx') if dataset_dir else None
 
 # MongoDB
 MONGODB_URI = os.getenv('MONGODB_URI')
 MONGODB_DB = os.getenv('MONGODB_DB')
-MONGODB_COLLECTION = os.getenv('MONGODB_COLLECTION')
+MONGODB_COLLECTION_DATASET = os.getenv('MONGODB_COLLECTION_DATASET')
+MONGODB_COLLECTION_INFERENCE = os.getenv('MONGODB_COLLECTION_INFERENCE')
+SCALING_TYPE = os.getenv('SCALING_TYPE')
 
 # Logging
 LOG_LEVEL = os.getenv('LOG_LEVEL')
@@ -33,12 +31,12 @@ def validate_configuration():
         bool: True se la configurazione è valida, False altrimenti.
     """
     required_config = {
-        'GOOGLE_FORM_ID': GOOGLE_FORM_ID,
         'DATASET_PATH': DATASET_PATH,
-        'GOOGLE_SERVICE_ACCOUNT_FILE': GOOGLE_SERVICE_ACCOUNT_FILE,
         'MONGODB_URI': MONGODB_URI,
         'MONGODB_DB': MONGODB_DB,
-        'MONGODB_COLLECTION': MONGODB_COLLECTION
+        'MONGODB_COLLECTION_DATASET': MONGODB_COLLECTION_DATASET,
+        'MONGODB_COLLECTION_INFERENCE': MONGODB_COLLECTION_INFERENCE,
+        'SCALING_TYPE': SCALING_TYPE
     }
     
     for key, value in required_config.items():
