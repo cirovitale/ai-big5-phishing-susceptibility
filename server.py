@@ -8,6 +8,8 @@ import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from config import validate_configuration, LOG_LEVEL
+from pipeline_inference.DL import DLProcessor
+from pipeline_inference.llm_for_prediction import LLMPrediction
 from services.mongodb_service import MongoDBService
 from pipeline_preprocessing.dataset_excel import ExcelDataProcessor
 from pipeline_inference.knn import KNNProcessor
@@ -117,27 +119,29 @@ def execute_inference_pipeline(query_traits):
     
     # LLM
     try:
-        # TODO
-        predictions['LLM'] = 0
+        llm_predictor = LLMPrediction()
+        llm_predictor_result = llm_predictor.process(query_traits)
+        
+        predictions['LLM'] = llm_predictor_result
+        logger.info(f"LLM RESULT: {llm_predictor_result}")
     except Exception as e:
         logger.error(f"Errore durante l'inferenza LLM: {e}", exc_info=True)
         predictions['LLM'] = None
     
     # DL
     try:
-        # TODO
-        predictions['DL'] = 0
+        dl_processor = DLProcessor()
+        data = mongodb_service.get_all_records()
+
+        # Addestra il modello
+        dl_processor.fit(data)
+        dl_result = dl_processor.process(query_traits)
+        
+        logger.info(f"DL result: {dl_result}")
+        predictions['DL'] = dl_result
     except Exception as e:
         logger.error(f"Errore durante l'inferenza DL: {e}", exc_info=True)
         predictions['DL'] = None
-    
-    # LSTM
-    try:
-        # TODO
-        predictions['LSTM'] = 0
-    except Exception as e:
-        logger.error(f"Errore durante l'inferenza LSTM: {e}", exc_info=True)
-        predictions['LSTM'] = None
     
     # ENSEMBLE
     try:
@@ -375,6 +379,11 @@ def testing():
             "error": f"Errore durante il testing: {str(e)}",
             "details": "Errore nell'elaborazione delle metriche"
         }), 500
+    
+@app.route('/training', methods=['GET'])
+def training():
+    return True
+    #TODO implementare
 
 def initialize_database():
     """

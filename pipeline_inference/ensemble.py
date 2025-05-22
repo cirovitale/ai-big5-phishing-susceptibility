@@ -2,7 +2,7 @@
 Modulo per l'ensemble di predittori per la valutazione della suscettibilità al phishing.
 
 Questo modulo implementa un modello di ensemble che combina i risultati di diversi predittori
-(KNN, Regressione, LLM, DL, LSTM) utilizzando una media pesata per ottenere una predizione finale.
+(KNN, Regressione, LLM, DL) utilizzando una media pesata per ottenere una predizione finale.
 """
 
 import logging
@@ -14,7 +14,7 @@ class EnsembleProcessor(InferencePipelineBase):
     """
     Processor che combina i risultati di diversi predittori usando una media pesata.
     
-    Formula: FinalPrediction = w0*KNN + w1*Regression + w2*LLM + w3*DL + w4*LSTM
+    Formula: FinalPrediction = w0*KNN + w1*Regression + w2*LLM + w3*DL
     dove w0,...,w4 sono i pesi assegnati a ciascun predittore.
     """
     
@@ -36,7 +36,6 @@ class EnsembleProcessor(InferencePipelineBase):
                 'Regression': 1,        # w1
                 'LLM': 0,               # w2
                 'DL': 0,                # w3
-                'LSTM': 0               # w4
             }
         else:
             self.weights = weights
@@ -64,18 +63,15 @@ class EnsembleProcessor(InferencePipelineBase):
             regression_value = float(predictions.get('Regression', 0))
             llm_value = float(predictions.get('LLM', 0))
             dl_value = float(predictions.get('DL', 0))
-            lstm_value = float(predictions.get('LSTM', 0))
             
             final_value = (
                 self.weights['KNN'] * knn_value +
                 self.weights['Regression'] * regression_value +
                 self.weights['LLM'] * llm_value +
-                self.weights['DL'] * dl_value +
-                self.weights['LSTM'] * lstm_value
+                self.weights['DL'] * dl_value
             )
             
-            # final_value = round(final_value, 2) / len(final_value)
-            final_value = round(final_value, 2) / 2 # TODO: cambiare, ora 2 perchè solo KNN e Regression
+            final_value = round(final_value, 2) / len(final_value)
             
             logger.debug(f"Calcolato valore finale: {final_value} per predizioni: {predictions}")
             return final_value

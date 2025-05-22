@@ -226,7 +226,7 @@ class ExcelDataProcessor(DataProcessorBase):
                 record = {
                     'source': 'excel_dataset',
                     'demographic_traits': {
-                        'country': row.get('Group', ''),
+                        #'country': row.get('Group', ''),
                         'age': int(row.get('Age', 0)) if pd.notna(row.get('Age', 0)) else 0,
                         'gender': row.get('Gender', ''),
                     },
