@@ -10,7 +10,7 @@ import numpy as np
 from pipeline_inference.pipeline_inference_base import InferencePipelineBase
 from config import OPENAI_API_KEY
 from openai import OpenAI
-from embedder_service import EmbedderService
+from . import embedder_service
 from pydantic import BaseModel, confloat
 import matplotlib.pyplot as plt
 import shap

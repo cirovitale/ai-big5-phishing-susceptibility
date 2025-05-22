@@ -5,3 +5,10 @@ app.log
 .git/
 .gitignore
 .env
+*.ipynb
+models/
+*.ckpt
+*.h5
+*.pt
+*.onnx
+.vscode/

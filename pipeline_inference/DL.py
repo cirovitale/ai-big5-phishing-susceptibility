@@ -13,10 +13,9 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from pipeline_inference.pipeline_inference_base import InferencePipelineBase
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.models import load_model as keras_load_model
+from keras.models import Sequential, load_model as keras_load_model
+from keras.layers import Dense
+from keras.optimizers import Adam
 import shap
 
 logger = logging.getLogger(__name__)
