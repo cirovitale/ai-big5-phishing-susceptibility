@@ -1,51 +1,165 @@
-# ai-big5-phishing-susceptibility
+# Language:
+- 🇬🇧 [ENGLISH VERSION](#english-version)
+- 🇮🇹 [ITALIAN VERSION](#italian-version)
 
-<!-- MongoDB -->
+# ENGLISH VERSION
 
-installazione Docker MongoDB e config .ENV
+# AI-BIG5-Phishing-Susceptibility 
+Initially designed for the University of Salerno's Artificial Intelligence course, then engineered according to the principles of Software Engineering for Artificial Intelligence, explored in depth in the University of Salerno's course of the same name, for industrial deployment.
 
-<!-- Google Cloud -->
+## 👥 Team
+- [Simone Scermino](https://github.com/Hikki00)
+- [Ciro Vitale](https://github.com/cirovitale)
 
-Generare file di autenticazione GUIDA e config .ENV
+## 📝 Description
+A flexible, production-ready system to predict user susceptibility to phishing attacks based on the Big Five (OCEAN) personality traits. Born from academic research (literature review on Big Five correlations and demographic factors), our solution implements and ensembles four complementary models: KNN, Regression, Deep Learning, and an LLM-based approach—to maximize accuracy and robustness.
 
-nome service account: ai-big5-phishing-susceptibility
-email: ai-big5-phishing-susceptibilit@aesthetic-hub-449411-f3.iam.gserviceaccount.com
-form-id: 1hE0Hbp_HJu4yrnOppYivRx6d--s0cfekIl_c7mjIIl0
+## 🛠️ Technologies
+- **Backend**: Python, Flask
+- **Models**: scikit-learn, TensorFlow/Keras, OpenAI API
+- **Database**: MongoDB
+- **Explainability**: SHAP
+- **Deployment**: Docker, Docker Compose
 
-<!-- installazione -->
+## 🚀 Quick Start
 
-venv e requirements.txt
+### 1. Clone repository
+```bash
+git clone https://github.com/cirovitale/ai-big5-phishing-susceptibility.git
+cd ai-big5-phishing-susceptibility
+````
 
-# Pattern Architetturali e Principi di Design
+### 2. Configure environment
 
-## Architettura del Sistema
+```bash
+cp .env.example .env
+```
 
-mettere nero su bianco riportando anche i design pattern utilizzati
+Edit `.env` with your values:
 
-## Code Best Practices
+```dotenv
+# OpenAI API Configuration
+OPENAI_API_KEY=<your_secret_key>
 
-- **Documentazione**: Docstring complete con descrizioni di parametri, ritorni ed eccezioni
-- **Error Handling**: Gestione strutturata con try/except e logging appropriato
-- **Logging**: Sistema gerarchico con livelli differenziati per facilitare il troubleshooting e TRACES
-- **Configurazione**: Separazione tra codice e parametri configurabili tramite variabili d'ambiente
-- **Naming Convention**: Nomenclatura descrittiva in inglese standardizzata
-- **Immutabilità**: Preferenza per costrutti immutabili e controllo degli effetti collaterali
+# MongoDB
+MONGODB_URI=mongodb://userAdmin:password@mongodb:27017/ai-bi5-phishing-susceptibility?authSource=admin
+MONGODB_URI_USER=userAdmin
+MONGODB_URI_PASSWORD=password
+MONGODB_DB=ai-bi5-phishing-susceptibility
+MONGODB_COLLECTION_INFERENCE=prediction
+MONGODB_COLLECTION_DATASET=dataset
 
-## Vantaggi Abilitati dall'Architettura
+# Dataset Processing
+DATASET_PATH = dataset/Dataset.xlsx
+CRITICALITY_THRESHOLD = 0.5
+SCALING_TYPE = "min_max" # o "standard"
 
-**Manutenibilità**
-**Estendibilità**
-**Riusabilità**
-**Testabilità**
-**Scalabilità**
-**Robustezza**
-**Flessibilità**
+# Logging
+LOG_LEVEL=INFO
+```
 
-# data preprocessing
+### 3. Launch with Docker Compose
 
-dataset_analysis.py
+```bash
+docker-compose up -d
+```
 
-NO MISSING DATA
-Da survey a SUSCETTIBILITà, come da paper, sommando i delta e normalizzando (min-max scaling), min-max scaling anche per i tratti.
-Rimossi i Group=Arab per incongruenza con analisi effettuate
-Cercare il valore threshold per DATASET_THRESHOLD ideale
+This will start:
+
+* **app** on port `5000`
+* **mongo** on port `27017`
+
+### 4. Access Services
+
+* **API Docs**: [http://localhost:5000/](http://localhost:5000/)
+
+### 5. Teardown
+
+```bash
+docker-compose down
+```
+
+---
+
+# ITALIAN VERSION
+
+# AI-BIG5-Phishing-Susceptibility
+
+Inizialmente ideato per il corso di Intelligenza Artificiale dell'Università degli Studi di Salerno, poi ingegnerizzato secondo i principi di Software Engineering for Artificial Intelligence, approfonditi nell'omonimo corso dell'Università degli Studi di Salerno, per un deploy industriale.
+
+## 👥 Team
+
+* [Simone Scermino](https://github.com/Hikki00)
+* [Ciro Vitale](https://github.com/cirovitale)
+
+## 📝 Descrizione
+
+Un sistema flessibile e pronto per la messa in produzione per prevedere la suscettibilità degli utenti agli attacchi di phishing sulla base dei tratti di personalità dei Big Five (OCEAN). Supportato da una revisione della letteratura sulle correlazioni dei Big Five, la nostra soluzione implementa ed effettua l'ensemble di quattro modelli complementari: KNN, Regressione, Deep Learning e un approccio basato su LLM per massimizzare l'accuratezza e la robustezza.
+
+## 🛠️ Tecnologie
+
+* **Backend**: Python, Flask
+* **Modelli**: scikit-learn, TensorFlow/Keras, API OpenAI
+* **Database**: MongoDB
+* **Explainability**: SHAP
+* **Deployment**: Docker, Docker Compose
+
+## 🚀 Avvio rapido
+
+### 1. Clona il repository
+
+```bash
+git clone https://github.com/cirovitale/ai-big5-phishing-susceptibility.git
+cd ai-big5-phishing-susceptibility
+```
+
+### 2. Configura l’ambiente
+
+```bash
+cp .env.example .env
+```
+
+Modifica `.env` con i tuoi valori:
+
+```dotenv
+# OpenAI API Configuration
+OPENAI_API_KEY=<your_secret_key>
+
+# MongoDB
+MONGODB_URI=mongodb://userAdmin:password@mongodb:27017/ai-bi5-phishing-susceptibility?authSource=admin
+MONGODB_URI_USER=userAdmin
+MONGODB_URI_PASSWORD=password
+MONGODB_DB=ai-bi5-phishing-susceptibility
+MONGODB_COLLECTION_INFERENCE=prediction
+MONGODB_COLLECTION_DATASET=dataset
+
+# Dataset Processing
+DATASET_PATH = dataset/Dataset.xlsx
+CRITICALITY_THRESHOLD = 0.5
+SCALING_TYPE = "min_max" # o "standard"
+
+# Logging
+LOG_LEVEL=INFO
+```
+
+### 3. Avvia con Docker Compose
+
+```bash
+docker-compose up -d
+```
+
+Si avvieranno:
+
+* **app** su porta `5000`
+* **mongo** su porta `27017`
+
+### 4. Accedi ai servizi
+
+* **Documentazione API**: [http://localhost:5000/](http://localhost:5000/)
+
+
+### 5. Arresto
+
+```bash
+docker-compose down
+```
