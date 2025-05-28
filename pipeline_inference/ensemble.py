@@ -34,8 +34,8 @@ class EnsembleProcessor(InferencePipelineBase):
             self.weights = {
                 'KNN': 1,               # w0
                 'Regression': 1,        # w1
-                'LLM': 0,               # w2
-                'DL': 0,                # w3
+                'LLM': 1,               # w2
+                'DL': 1,                # w3
             }
         else:
             self.weights = weights
@@ -64,6 +64,7 @@ class EnsembleProcessor(InferencePipelineBase):
             llm_value = float(predictions.get('LLM', 0))
             dl_value = float(predictions.get('DL', 0))
             
+            final_value_indicators = 4
             final_value = (
                 self.weights['KNN'] * knn_value +
                 self.weights['Regression'] * regression_value +
@@ -71,7 +72,7 @@ class EnsembleProcessor(InferencePipelineBase):
                 self.weights['DL'] * dl_value
             )
             
-            final_value = round(final_value, 2) / len(final_value)
+            final_value = round(final_value, 2) / final_value_indicators
             
             logger.debug(f"Calcolato valore finale: {final_value} per predizioni: {predictions}")
             return final_value

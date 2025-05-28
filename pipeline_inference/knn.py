@@ -73,7 +73,7 @@ class KNNProcessor(InferencePipelineBase):
         try:
             # Directory del file corrente
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            # Salgo di un livello e punto alla cartella 'models'
+
             models_dir = os.path.normpath(os.path.join(script_dir, os.pardir, "models"))
             if not os.path.exists(models_dir):
                 os.makedirs(models_dir)
@@ -143,7 +143,6 @@ class KNNProcessor(InferencePipelineBase):
             
             self.data = np.array(personality_vectors)
             
-            # Addestra la pipeline
             self.pipeline.fit(self.data)
 
             self.save_model()

@@ -53,7 +53,7 @@ def execute_extraction_preprocessing_pipeline(process_form=False, process_excel=
     try:
         # Elaborazione dati dal form Google
         if process_form:
-            # TODO
+            # TODO al momento non è stata implementata l'interazione con Google, avendo già il dataset presente in letteratura
             pass
         
         # Elaborazione dati dal dataset Excel
@@ -96,7 +96,6 @@ def execute_inference_pipeline(query_traits):
         knn_processor = KNNProcessor()
         data = mongodb_service.get_all_records()
 
-        # Addestra il modello e trova i vicini
         knn_processor.fit(data)
         knn_result = knn_processor.process(query_traits)
         
@@ -133,7 +132,6 @@ def execute_inference_pipeline(query_traits):
         dl_processor = DLProcessor()
         data = mongodb_service.get_all_records()
 
-        # Addestra il modello
         dl_processor.fit(data)
         dl_result = dl_processor.process(query_traits)
         
@@ -253,7 +251,6 @@ def predict():
         traits = data['traits']
         required_traits = ['extraversion', 'agreeableness', 'conscientiousness', 'neuroticism', 'openness']
         
-        # Verifica e converti i tratti in float
         for trait in required_traits:
             if trait not in traits:
                 logger.error(f"Tratto mancante nella richiesta: {trait}")
@@ -267,7 +264,6 @@ def predict():
         logger.info("Avvio inferenza con i tratti forniti")
         result, model_predictions = execute_inference_pipeline(traits)
         
-        # Assicurati che result sia float
         result = float(result)
         
         response = {
@@ -362,7 +358,6 @@ def testing():
             logger.error("Testing fallito: nessun dato disponibile")
             return jsonify({"error": "Testing fallito. Nessun dato disponibile."}), 500
         
-        # Converti tutti i valori numerici in float e gestisci la matrice di confusione
         formatted_metrics = {
             "accuracy": float(metrics['accuracy']),
             "precision": float(metrics['precision']),
@@ -383,25 +378,22 @@ def testing():
 @app.route('/training', methods=['GET'])
 def training():
     return True
-    #TODO implementare
+    #TODO
 
 def initialize_database():
     """
     Inizializza il database con i dati dal file Excel se è vuoto.
     """
     try:
-        # Verifica se il database è vuoto
         record_count = mongodb_service.get_record_count()
         
         if record_count == 0:
             logger.info("Database vuoto. Caricamento dati iniziali...")
             
-            # Carica i dati dal file Excel
             excel_processor = ExcelDataProcessor()
             excel_processed_data = excel_processor.process_data()
             
             if excel_processed_data:
-                # Salva i dati in MongoDB
                 mongodb_service.save_data(excel_processed_data)
                 logger.info(f"Database inizializzato con {len(excel_processed_data)} record.")
             else:
@@ -429,7 +421,6 @@ def initialize_app():
             logger.error("Configurazione non valida. Verificare le variabili d'ambiente.")
             return False
         
-        # Inizializza il database se necessario
         if not initialize_database():
             logger.error("Errore durante l'inizializzazione del database.")
             return False

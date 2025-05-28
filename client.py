@@ -19,7 +19,6 @@ def test_predict():
         "user_id": "test_user_1"
     }
     
-    # Esegui le predizioni
     response = requests.post(
         f"{BASE_URL}/predict",
         json=input_data
@@ -43,16 +42,16 @@ def test_testing():
     print(json.dumps(response.json(), indent=2))
 
 def run_all_tests():
-    """Esegue tutti i test"""
+    """Esegue tutti i test delle chiamate presenti"""
     
-    # print("\n1. Test Predict")
-    # test_predict()
+    print("\n1. Test Predict")
+    test_predict()
     
     # print("\n2. Test Extract")
     # test_extract()
     
-    print("\n3. Test Testing")
-    test_testing()
+    #print("\n3. Test Testing")
+    #test_testing()
 
 if __name__ == "__main__":
     run_all_tests()

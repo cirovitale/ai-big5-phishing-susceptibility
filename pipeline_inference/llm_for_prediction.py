@@ -10,10 +10,12 @@ import numpy as np
 from pipeline_inference.pipeline_inference_base import InferencePipelineBase
 from config import OPENAI_API_KEY
 from openai import OpenAI
-from . import embedder_service
+from pipeline_inference.embedder_service import EmbedderService
 from pydantic import BaseModel, confloat
 import matplotlib.pyplot as plt
 import shap
+import os
+import matplotlib.pyplot as plt
 
 class ResponseFormat(BaseModel):
     user_vulnerability_analyzer_answer: str
@@ -55,6 +57,7 @@ class LLMPrediction(InferencePipelineBase):
         
         Args:
             traits: Dizionario contenente i tratti di personalità dell'utente
+            traits_list (opzionale): per lo SHAP globale
             
         Returns:
             dict: indice di criticità stimata
@@ -101,8 +104,6 @@ class LLMPrediction(InferencePipelineBase):
 
 
                 validation_response = self.check_response(traits, cricitality_calculated)
-                #response_processed = json.loads(validation_response) 
-                #validation = response_processed["validation"]
                 validation = validation_response.get("veridicita")
                 reason__previous_veridicita = validation_response.get("reason_veridicita")
                 logger.info(f"Veridicità dell'indice di criticità secondo l'esperto LLM: {validation:}")
@@ -111,15 +112,37 @@ class LLMPrediction(InferencePipelineBase):
                     break
             
 
-            # serve per stimare quanto ogni tratto influenza il calcolo finale
-            shap_vals = self.shap_implementation(traits)
-            print("Contributi SHAP:")
-            for feature, value in shap_vals.items():
-                print(f"{feature}: {value:+.4f}")
+            ### SEZIONE SHAP (commentata per velocizzare l'inferenza)
 
-            # Visualizza grafico (serve matplotlib e SHAP installati)
-            self.plot_shap_waterfall()
+            #shap_vals = self.shap_implementation(traits)
+            #print("Contributi SHAP:")
+            #for feature, value in shap_vals.items():
+            #    print(f"{feature}: {value:+.4f}")
 
+            #self.plot_shap_waterfall()
+            #logger.info(f"SHAP locale applicato su LLM, memorizzato il grafico nella cartella 'charts'")
+
+            # processing lista dati
+            # self.records = traits_list[:10]
+            # personality_vectors = []
+
+            # for record in traits_list:
+            #     if 'personality_traits' not in record:
+            #         raise ValueError("I record devono contenere personality_traits")
+                
+            #     traits = record['personality_traits']
+            #     vector = [
+            #         traits.get('extraversion', 0),
+            #         traits.get('agreeableness', 0),
+            #         traits.get('conscientiousness', 0),
+            #         traits.get('neuroticism', 0),
+            #         traits.get('openness', 0)
+            #     ]
+            #     personality_vectors.append(vector)
+
+
+            # self.plot_shap_summary_global(personality_vectors)
+            # logger.info(f"SHAP globale applicato su LLM, memorizzato il grafico nella cartella 'charts'")
 
             return round(cricitality_calculated, 2)
         except Exception as e:
@@ -127,6 +150,17 @@ class LLMPrediction(InferencePipelineBase):
             raise
 
     def answer_question(self, traits):
+        """
+        Genera una risposta testuale contenente il comportamento dell'utente in esame, sulla base dei suoi tratti OCEAN.
+        Genera l'indice di criticità dell'utente.
+        
+        Args:
+            traits: Dizionario contenente i tratti di personalità dell'utente
+            
+        Returns:
+            dict: Descrizione comportamento utente; criticità stimata
+            
+        """
 
         main_prompt = (
             "Sei il digital twin di un utente reale e devi impersonificarlo in modo coerente con i suoi comportamenti mediante i valori del suo modello psicologico OCEAN. I valori dei tratti sono forniti in formato JSON, nel formato \"nome_tratto: valore_tratto\", dove \"valore_tratto\" corrisponde appunto al valore del tratto associato."
@@ -140,16 +174,13 @@ class LLMPrediction(InferencePipelineBase):
             model=self.MODEL,
             messages=[
                 {"role": "system", "content": main_prompt},
-                #{"role": "user", "content": f"Tratti dell'utente in esame: {traits}"},
                 {"role": "user", "content": f"Domanda: Come ti poni rispetto ad una nuova mail nella tua casella di posta, o un nuovo messaggio sul tuo servizio di messaggistica preferito? Pensa step by step prima di rispondere, facendo rigorosamente riferimento ai tratti e agli studi forniti. Rispondi in prima persona commettendo gli eventuali errori dell'utente sulla base della sua personalità, in breve descrivendo l'azione compiuta in base al contesto (positiva o negativa che sia), non fare considerazioni sulla bontà della risposta, rispondi solo in base a cosa farebbe l'utente analizzato in base ai suoi tratti. Limita la risposta a 400 lettere, senza includere citazioni ai punteggi. Voglio che tutta la risposta rispecchi un utente che sta parlando in prima persona di come si comporterebbe."}
             ],
             response_format=ResponseFormat
         ).choices[0].message.content
 
         criticità_raw = self.calculate_criticality(risposta_testuale, traits)
-        #criticità_raw = self.calculate_criticality_no_knowledge_studies(risposta_testuale, traits)
-        
-        #criticità_raw = self.calculate_criticality_majority(risposta_testuale, traits)
+
         criticità = json.loads(criticità_raw) 
 
 
@@ -162,7 +193,17 @@ class LLMPrediction(InferencePipelineBase):
 
     # tecnica utilizzata: few-shot prompting
     def calculate_criticality(self, answer, traits):
-
+        """
+        Genera l'indice di criticità dell'utente.
+        
+        Args:
+            traits: Dizionario contenente i tratti di personalità dell'utente
+            answer: Descrizione testuale del comportamento dell'utente in esame
+            
+        Returns:
+            dict: criticità stimata
+            
+        """
 
         main_prompt = (
             "Sei un esperto nell'assegnazione di indici di criticità ai comportamenti degli utenti, valutati attraverso l'analisi dei loro tratti psicologici riassunti con il modello OCEAN, insieme ad una breve descrizione di come esso si comporterebbe di fronte ad uno scenario generico di phishing. Nello specifico, ti fornirò: 'Esempi di assegnazione indice di criticità', ovvero 4 Esempi di come andrebbe valutato l'indice di criticità sulla base di comportamento e tratti dell'utente; 'Descrizione dei nostri studi', in cui ti sintetizzo i risultati degli studi utili per valutare meglio la suscettibilità dell'utente sulla base dei suoi tratti; 'Tratti dell'utente in esame', in cui sono presenti i 5 tratti OCEAN dell'utente in esame; 'Comportamento dell'utente in esame', in cui è presente una descrizione del comportamento dell'utente di fronte a scenari di phishing generici. Analizza questo materiale ed assegna un valore all'indice di criticità all'utente preso in esame. "
@@ -203,7 +244,20 @@ class LLMPrediction(InferencePipelineBase):
 
     # tecnica utilizzata: self-refinement
     def calculate_criticality_w_previous_feedback(self, answer, traits, previous_criticality, previous_verification):
-
+        """
+        Genera l'indice di criticità dell'utente.
+        Viene richiamato con i precedenti calcoli fatti per criticità e validatore, così da poter indicare al LLM gli errori fatti.
+        
+        Args:
+            traits: Dizionario contenente i tratti di personalità dell'utente
+            answer: Descrizione testuale del comportamento dell'utente in esame
+            previous_criticality: Indice di criticalità calcolato nell'iterazione precedente del LLM
+            previous_verification: Risultato del validatore nella iterazione precedente del LLM
+            
+        Returns:
+            dict: criticità stimata
+            
+        """
 
         main_prompt = (
             "Sei un esperto nell'assegnazione di indici di criticità ai comportamenti dei dipendenti, valutati attraverso l'analisi dei tratti psicologici dell'utente riassunti con il modello OCEAN insieme ad una breve descrizione di come esso si comporterebbe di fronte ad uno scenario generico di phishing. Valuta queste due cose per poter assegnare un valore all'indice di criticità. "
@@ -245,6 +299,17 @@ class LLMPrediction(InferencePipelineBase):
 
     # tecnica utilizzata: zero-shot
     def calculate_criticality_no_knowledge_studies(self, answer, traits):
+        """
+        Genera l'indice di criticità dell'utente. In questa funzione, non sono presenti citazioni agli studi fatti in letteratura.
+        
+        Args:
+            traits: Dizionario contenente i tratti di personalità dell'utente
+            answer: Descrizione testuale del comportamento dell'utente in esame
+            
+        Returns:
+            dict: criticità stimata
+            
+        """   
 
         main_prompt = (
             "Sei un esperto nell'assegnazione di indici di criticità ai comportamenti dei dipendenti, valutati attraverso l'analisi dei tratti psicologici dell'utente riassunti con il modello OCEAN insieme ad una breve descrizione di come esso si comporterebbe di fronte ad uno scenario generico di phishing. Valuta queste due cose per poter assegnare un valore all'indice di criticità. "
@@ -273,19 +338,21 @@ class LLMPrediction(InferencePipelineBase):
 
         return criticalita
 
-    # Self consistency
+    # Self consistency (scartato perchè non mostrava miglioramenti)
     def calculate_criticality_majority(self, answer, traits, n=5):
         """
         Applica la self-consistency eseguendo n campionamenti su calculate_criticality
         e aggrega i valori di criticità tramite mediana.
 
         Args:
-            answer (str): testo di comportamento dell'utente.
-            n (int): numero di traiettorie di sampling.
+            answer: testo di comportamento dell'utente.
+            traits: tratti dell'utente in esame
+            n: numero di traiettorie di sampling.
 
-        Ritorna:
-            str: JSON con {"criticita": valore_mediano}.
+        Returns:
+            dict: Indice di criticità medio degli n campionamenti
         """
+
         criticities = []
         for _ in range(n):
             raw = self.calculate_criticality(answer, traits)
@@ -305,7 +372,17 @@ class LLMPrediction(InferencePipelineBase):
 
 
     def check_response(self, traits, estimated_criticality):
-
+        """
+        Valida (o meno) la criticità stimata per l'utente in esame
+        
+        Args:
+            traits: Dizionario contenente i tratti di personalità dell'utente
+            estimated_criticality: Indice di criticità stimata per l'utente in esame
+            
+        Returns:
+            dict: booleano indicante se l'indice è validato o meno
+            
+        """ 
         ocean_knowledge = (
             "Openness (to experience): Talvolta chiamata intelletto o immaginazione, rappresenta la disponibilità a provare cose nuove e a pensare fuori dagli schemi. I tratti includono perspicacia, originalità e curiosità."
             "Conscientiousness: Il desiderio di essere attenti, diligenti e di regolare la gratificazione immediata con l’autodisciplina. I tratti includono ambizione, disciplina, coerenza e affidabilità."
@@ -314,7 +391,7 @@ class LLMPrediction(InferencePipelineBase):
             "Neuroticism: Una tendenza verso tratti di personalità negativi, instabilità emotiva e pensieri autodistruttivi. I tratti includono pessimismo, ansia, insicurezza e timore."
         )
 
-        main_prompt = ( ##TODO capire se questo punto va bene così o si deve dare una motivazione più dettagliata per constatare la veridicità dell'indice
+        main_prompt = ( 
             "Sei un validatore che ha il compito di verificare se la risposta fornita dal digital twin è coerente con le caratteristiche dell'utente, ovvero i suoi tratti di personalità sintetizzati mediante modello OCEAN. Leggi, di seguito, le definizioni di OCEAN per poter avere una panoramica migliore su tale modello, e 'Descrizione dei nostri studi', in cui sintetizzo i risultati analizzati in letteratura: "
             + ocean_knowledge +
             "Descrizione dei nostri studi: dai nostri studi, è risultato che un aumento nei valori dei tratti Agreeableness, Neuroticism, Extraversion (in questo ordine) comportano anche una crescita della suscettibilità al phishing dell'utente (di conseguenza, una loro diminuzione comporta una minore suscettibilità). Conscientiousness invece dimostra il comportamento opposto, ovvero che al suo crescere la suscettibilità dell'utente si riduce. Openness ha dimostrato comportamenti neutrali, leggermente tendenti verso il far crescere la suscettibilità dell'utente insieme alla loro crescita, anche se in maniera minore degli altri 3 tratti citati. Ricorda queste informazioni quando andrai ad analizzare la situazione dell'utente e applica tali nozioni sui suoi tratti in modo non banale."
@@ -333,7 +410,7 @@ class LLMPrediction(InferencePipelineBase):
             response_format=ValidationFormat
         ).choices[0].message.content
 
-        # per capire se e perchè dà falso alla veridicità
+        # per capire se e perchè dà falso alla veridicità (serve per il self-refinement)
         reason_veridicita = self.openai_client.beta.chat.completions.parse(
             model=self.MODEL,
             messages=[
@@ -353,6 +430,18 @@ class LLMPrediction(InferencePipelineBase):
 
 
     def shap_implementation(self, traits: dict, nsamples: int = 10):
+        """
+        Predice l'indice di criticità di un utente in base ai suoi tratti di personalità (OCEAN).
+        
+        Args:
+            traits: Dizionario contenente i tratti di personalità dell'utente
+            nsamples: quanti sample creare (perturbazione) per allenare SHAP
+            
+        Returns:
+            dict: spiegazione mediante SHAP dell'utente e i suoi tratti
+            
+        """
+
         feature_names = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
         baseline = np.array([0.5] * len(feature_names)).reshape(1, -1)
 
@@ -377,22 +466,6 @@ class LLMPrediction(InferencePipelineBase):
         self._shap_input = x
         return dict(zip(feature_names, shap_arr.tolist()))
 
-    def plot_shap(self, shap_values: dict):
-        """
-        Visualizza i valori SHAP con un bar chart.
-
-        Args:
-            shap_values (dict): mapping trait -> shap value
-        """
-        names = list(shap_values.keys())
-        values = list(shap_values.values())
-        plt.figure(figsize=(6,4))
-        plt.bar(names, values)
-        plt.xticks(rotation=45, ha='right')
-        plt.ylabel("SHAP value")
-        plt.title("SHAP feature contributions")
-        plt.tight_layout()
-        plt.show()
 
     def plot_shap_waterfall(self):
         """
@@ -400,10 +473,61 @@ class LLMPrediction(InferencePipelineBase):
         """
         if not hasattr(self, '_shap_explainer') or not hasattr(self, '_shap_input'):
             raise RuntimeError("Esegui prima shap_implementation per popolare explainer e input.")
+        feature_names = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
         exp = shap.Explanation(
-            values=self._shap_explainer.shap_values(self._shap_input, nsamples=10)[0],  # coerenza con default
+            values=self._shap_explainer.shap_values(self._shap_input, nsamples=10)[0], 
             base_values=self._shap_explainer.expected_value,
             data=self._shap_input[0],
-            feature_names=["Openness","Conscientiousness","Extraversion","Agreeableness","Neuroticism"]
+            feature_names=feature_names
         )
-        shap.waterfall_plot(exp)
+        fig = plt.figure() 
+
+        shap.plots._waterfall.waterfall_legacy(
+            exp.base_values,
+            exp.values,
+            feature_names=exp.feature_names
+        )
+
+        chart_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "chart"))
+        os.makedirs(chart_dir, exist_ok=True)
+        path = os.path.join(chart_dir, "shap_waterfall_llm.png")
+        fig.savefig(path, bbox_inches="tight")
+        plt.close(fig)
+
+
+    def plot_shap_summary_global(self, traits_list: list):
+        """
+        Effettua una explanation globale di LLM mediante SHAP
+        Args:
+            traits_list: Dizionario contenente i tratti di personalità degli utenti necessari per l'explanation
+        """
+        traits_list = traits_list[:10]
+
+        feature_names = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
+        baseline = np.array([0.5] * len(feature_names)).reshape(1, -1)
+
+        def f(X):
+            results = []
+            for row in X:
+                t = dict(zip(feature_names, row.tolist()))
+                key = tuple(t.values())
+                if key in self.llm_cache:
+                    resp = self.llm_cache[key]
+                else:
+                    resp = self.answer_question(t)
+                    self.llm_cache[key] = resp
+                results.append(resp['criticality_index'])
+            return np.array(results)
+
+        explainer = shap.KernelExplainer(f, baseline)
+        X = np.array(traits_list)
+        shap_values = explainer.shap_values(X, nsamples=10)
+
+        chart_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "chart"))
+        os.makedirs(chart_dir, exist_ok=True)
+        path = os.path.join(chart_dir, "shap_summary_llm.png")
+
+        shap.summary_plot(shap_values, X, feature_names=feature_names, show=False)
+        plt.savefig(path, bbox_inches='tight')
+        plt.close()
+

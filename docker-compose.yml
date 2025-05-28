@@ -8,6 +8,7 @@ services:
     ports:
       - "5000:5000"
     environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - MONGODB_URI=${MONGODB_URI}
       - MONGODB_URI_USER=${MONGODB_URI_USER}
       - MONGODB_URI_PASSWORD=${MONGODB_URI_PASSWORD}
@@ -19,12 +20,19 @@ services:
       - SCALING_TYPE=${SCALING_TYPE}
       - LOG_LEVEL=${LOG_LEVEL}
       - PYTHONUNBUFFERED=1
+      - CUDA_VISIBLE_DEVICES=-1
+      - TF_CPP_MIN_LOG_LEVEL=2
+      - TF_ENABLE_ONEDNN_OPTS=0
     volumes:
       - ./dataset:/app/dataset
       - ./logs:/logs
     depends_on:
       - mongodb
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 4G
 
   mongodb:
     image: mongo
