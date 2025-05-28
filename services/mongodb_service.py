@@ -8,7 +8,8 @@ e l'inserimento o aggiornamento dei dati elaborati.
 import logging
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
-from config import MONGODB_URI, MONGODB_DB, MONGODB_COLLECTION_DATASET, MONGODB_COLLECTION_INFERENCE
+from config import MONGODB_URI, MONGODB_DB, MONGODB_COLLECTION_DATASET, MONGODB_COLLECTION_INFERENCE, MONGODB_COLLECTION_DT
+import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class MongoDBService:
         self.db = None
         self.dataset_collection = None
         self.inference_collection = None
+        self.digital_twin_collection = None
         self.connect()
         self.select_database_and_collections()
     
@@ -56,7 +58,7 @@ class MongoDBService:
         Deve essere chiamato dopo connect().
         
         Returns:
-            tuple: (dataset_collection, inference_collection) Le collezioni MongoDB selezionate.
+            tuple: (dataset_collection, inference_collection, digital_twin_collection) Le collezioni MongoDB selezionate.
         
         Raises:
             RuntimeError: Se chiamato prima della connessione.
@@ -70,9 +72,10 @@ class MongoDBService:
             self.db = self.client[MONGODB_DB]
             self.dataset_collection = self.db[MONGODB_COLLECTION_DATASET]
             self.inference_collection = self.db[MONGODB_COLLECTION_INFERENCE]
+            self.digital_twin_collection = self.db[MONGODB_COLLECTION_DT]
             
-            logger.info(f"Database '{MONGODB_DB}' e collezioni '{MONGODB_COLLECTION_DATASET}', '{MONGODB_COLLECTION_INFERENCE}' selezionati")
-            return self.dataset_collection, self.inference_collection
+            logger.info(f"Database '{MONGODB_DB}' e collezioni '{MONGODB_COLLECTION_DATASET}', '{MONGODB_COLLECTION_INFERENCE}', '{MONGODB_COLLECTION_DT}' selezionati")
+            return self.dataset_collection, self.inference_collection, self.digital_twin_collection
         
         except OperationFailure as e:
             logger.error(f"Errore nell'accesso a database o collezioni: {e}")
@@ -200,3 +203,141 @@ class MongoDBService:
         except Exception as e:
             logger.error(f"Errore durante il conteggio dei record del dataset: {e}")
             return 0
+
+    def register_digital_twin(self, digital_twin_data):
+        """
+        Registra un nuovo digital twin in MongoDB.
+        
+        Args:
+            digital_twin_data (dict): Dati del digital twin contenenti:
+                - cf (str): Codice fiscale
+                - first_name (str): Nome
+                - last_name (str): Cognome  
+                - traits (dict): Tratti di personalità Big5
+                - creation_datetime (datetime, opzionale): Data/ora di creazione
+                - last_update_datetime (datetime, opzionale): Data/ora ultimo aggiornamento
+                - last_training_datetime (datetime, opzionale): Data/ora ultimo training
+        
+        Returns:
+            str: ID del documento inserito
+        
+        Raises:
+            RuntimeError: Se la collezione digital twin non è stata selezionata
+            ValueError: Se i dati obbligatori sono mancanti
+        """
+        if self.digital_twin_collection is None:
+            logger.error("Collezione digital twin non selezionata")
+            raise RuntimeError("Collezione digital twin non selezionata. Chiamare select_database_and_collections() prima.")
+        
+        required_fields = ['cf', 'first_name', 'last_name', 'traits']
+        for field in required_fields:
+            if field not in digital_twin_data or not digital_twin_data[field]:
+                raise ValueError(f"Campo obbligatorio mancante: {field}")
+        
+        required_traits = ['extraversion', 'agreeableness', 'conscientiousness', 'neuroticism', 'openness']
+        traits = digital_twin_data['traits']
+        for trait in required_traits:
+            if trait not in traits:
+                raise ValueError(f"Tratto obbligatorio mancante: {trait}")
+        
+        try:
+            # Verifica se esiste già un digital twin con lo stesso CF
+            existing_dt = self.digital_twin_collection.find_one({"cf": digital_twin_data['cf']})
+            if existing_dt:
+                raise ValueError(f"Digital twin con CF {digital_twin_data['cf']} già esistente")
+            
+            # Prepara i dati con timestamps
+            current_time = datetime.datetime.now()
+            dt_record = {
+                "cf": digital_twin_data['cf'],
+                "first_name": digital_twin_data['first_name'],
+                "last_name": digital_twin_data['last_name'],
+                "traits": digital_twin_data['traits'],
+                "creation_datetime": digital_twin_data.get('creation_datetime', current_time),
+                "last_update_datetime": digital_twin_data.get('last_update_datetime', current_time),
+                "last_training_datetime": digital_twin_data.get('last_training_datetime', None)
+            }
+            
+            result = self.digital_twin_collection.insert_one(dt_record)
+            
+            if result.inserted_id:
+                logger.info(f"Digital twin registrato con successo per CF: {digital_twin_data['cf']}, ID: {result.inserted_id}")
+                return str(result.inserted_id)
+            else:
+                logger.warning(f"Impossibile registrare il digital twin per CF: {digital_twin_data['cf']}")
+                return None
+        
+        except Exception as e:
+            logger.error(f"Errore durante la registrazione del digital twin: {e}")
+            raise
+
+    def get_digital_twin_by_cf(self, cf):
+        """
+        Recupera un digital twin tramite codice fiscale.
+        
+        Args:
+            cf (str): Codice fiscale
+        
+        Returns:
+            dict: Dati del digital twin trovato, None se non trovato
+        
+        Raises:
+            RuntimeError: Se la collezione digital twin non è stata selezionata
+        """
+        if self.digital_twin_collection is None:
+            logger.error("Collezione digital twin non selezionata")
+            raise RuntimeError("Collezione digital twin non selezionata. Chiamare select_database_and_collections() prima.")
+        
+        try:
+            digital_twin = self.digital_twin_collection.find_one({"cf": cf})
+            
+            if digital_twin:
+                logger.debug(f"Digital twin trovato per CF: {cf}")
+                return digital_twin
+            else:
+                logger.warning(f"Nessun digital twin trovato per CF: {cf}")
+                return None
+        
+        except Exception as e:
+            logger.error(f"Errore durante il recupero del digital twin per CF {cf}: {e}")
+            raise
+
+    def update_digital_twin_last_training(self, cf):
+        """
+        Aggiorna la data dell'ultimo training per un digital twin.
+        
+        Args:
+            cf (str): Codice fiscale del digital twin
+        
+        Returns:
+            bool: True se l'aggiornamento è avvenuto con successo, False altrimenti
+        
+        Raises:
+            RuntimeError: Se la collezione digital twin non è stata selezionata
+        """
+        if self.digital_twin_collection is None:
+            logger.error("Collezione digital twin non selezionata")
+            raise RuntimeError("Collezione digital twin non selezionata. Chiamare select_database_and_collections() prima.")
+        
+        try:
+            current_time = datetime.datetime.now()
+            result = self.digital_twin_collection.update_one(
+                {"cf": cf},
+                {
+                    "$set": {
+                        "last_training_datetime": current_time,
+                        "last_update_datetime": current_time
+                    }
+                }
+            )
+            
+            if result.modified_count > 0:
+                logger.info(f"Data ultimo training aggiornata per CF: {cf}")
+                return True
+            else:
+                logger.warning(f"Nessun digital twin aggiornato per CF: {cf}")
+                return False
+        
+        except Exception as e:
+            logger.error(f"Errore durante l'aggiornamento dell'ultimo training per CF {cf}: {e}")
+            raise

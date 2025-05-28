@@ -7,7 +7,7 @@ import json
 import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from config import validate_configuration, LOG_LEVEL
+from config import validate_configuration, LOG_LEVEL, MONGODB_COLLECTION_DT
 from pipeline_inference.DL import DLProcessor
 from pipeline_inference.llm_for_prediction import LLMPrediction
 from services.mongodb_service import MongoDBService
@@ -295,6 +295,45 @@ def execute_testing_pipeline():
         logger.error(f"Errore durante il testing: {e}", exc_info=True)
         return None
 
+def execute_inference_pipeline_by_cf(cf):
+    """
+    Esegue la pipeline di inferenza per un digital twin identificato dal codice fiscale.
+    
+    Args:
+        cf (str): Codice fiscale del digital twin
+        
+    Returns:
+        tuple: (float, dict, dict) - Valore finale calcolato dall'ensemble, predizioni dei singoli modelli, e dati del digital twin
+        
+    Raises:
+        ValueError: Se il digital twin non viene trovato
+        Exception: Se si verificano errori durante l'inferenza
+    """
+    logger.info(f"Avvio pipeline di inference per digital twin con CF: {cf}")
+    
+    try:
+        # Recupera digital twin dal database
+        digital_twin = mongodb_service.get_digital_twin_by_cf(cf)
+        if not digital_twin:
+            raise ValueError(f"Digital twin non trovato per CF: {cf}")
+        
+        # Estrae i tratti di personalità
+        traits = digital_twin.get('traits')
+        if not traits:
+            raise ValueError(f"Tratti di personalità non trovati per il digital twin con CF: {cf}")
+        
+        logger.info(f"Tratti recuperati per CF {cf}: {traits}")
+        
+        # Esegue l'inferenza utilizzando i tratti del digital twin
+        result, model_predictions = execute_inference_pipeline(traits)
+        
+        logger.info(f"Inferenza completata per digital twin CF {cf}: {result}")
+        return result, model_predictions, digital_twin
+        
+    except Exception as e:
+        logger.error(f"Errore durante l'inferenza per digital twin CF {cf}: {e}", exc_info=True)
+        raise
+
 @app.route('/', methods=['GET'])
 def index():
     """
@@ -308,10 +347,13 @@ def index():
         "status": "online",
         "info": "API per la predizione della suscettibilità al phishing basata su tratti di personalità Big5",
         "endpoints": {
-            "/predict": "POST - Predice la suscettibilità al phishing",
             "/extract": "POST - Esegue estrazione e preprocessing dei dati",
-            "/test": "GET - Esegue test sul modello",
-            "/health": "GET - Verifica lo stato del servizio"
+            "/training": "POST - Esegue addestramento dei modelli",
+            "/predict": "POST - Predice la suscettibilità al phishing a partire da tratti di personalità",
+            "/testing": "GET - Esegue test sul modello in base al dataset",
+            "/digital-twin/register": "POST - Registra un nuovo digital twin",
+            "/digital-twin/predict": "POST - Predice la suscettibilità a partire dal digital twin (CF)", 
+            "/digital-twin/<cf>": "GET - Recupera i dati di un digital twin (CF)",
         }
     })
 
@@ -329,7 +371,7 @@ def predict():
             "neuroticism": float,
             "openness": float
         },
-        "user_id": str (opzionale)
+        "cf": str (opzionale)
     }
     
     Returns:
@@ -363,16 +405,15 @@ def predict():
         result = float(result)
         
         response = {
-            "prediction": result,
             "susceptibility_score": result,
             "model_predictions": {k: float(v) if v is not None else None 
                                 for k, v in model_predictions.items()}
         }
         
-        if 'user_id' in data:
-            logger.info(f"Salvataggio predizione per user_id: {data['user_id']}")
+        if 'cf' in data:
+            logger.info(f"Salvataggio predizione per cf: {data['cf']}")
             prediction_record = {
-                "user_id": data['user_id'],
+                "cf": data['cf'],
                 "traits": traits,
                 "prediction": result,
                 "model_predictions": response["model_predictions"],
@@ -591,6 +632,203 @@ def initialize_app():
     except Exception as e:
         logger.error(f"Errore durante l'inizializzazione dell'applicazione: {e}", exc_info=True)
         return False
+
+@app.route('/digital-twin/register', methods=['POST'])
+def register_digital_twin():
+    """
+    Endpoint per la registrazione di un nuovo digital twin.
+    
+    Input JSON:
+    {
+        "cf": str,
+        "first_name": str,
+        "last_name": str,
+        "traits": {
+            "extraversion": float,
+            "agreeableness": float,
+            "conscientiousness": float,
+            "neuroticism": float,
+            "openness": float
+        },
+        "creation_datetime": str (opzionale, formato ISO),
+        "last_update_datetime": str (opzionale, formato ISO),
+        "last_training_datetime": str (opzionale, formato ISO)
+    }
+    
+    Returns:
+        JSON: Risultato della registrazione con ID del digital twin creato
+    """
+    logger.info("Richiesta ricevuta per l'endpoint /digital-twin/register")
+    
+    try:
+        data = request.get_json()
+        logger.info(f"Dati ricevuti per registrazione digital twin: {json.dumps(data, indent=2, default=str)}")
+        
+        if not data:
+            logger.error("Dati mancanti nella richiesta di registrazione digital twin")
+            return jsonify({"error": "Dati mancanti. È richiesto un JSON con i campi obbligatori."}), 400
+        
+        required_fields = ['cf', 'first_name', 'last_name', 'traits']
+        for field in required_fields:
+            if field not in data or not data[field]:
+                logger.error(f"Campo obbligatorio mancante: {field}")
+                return jsonify({"error": f"Campo obbligatorio mancante: {field}"}), 400
+        
+        traits = data['traits']
+        required_traits = ['extraversion', 'agreeableness', 'conscientiousness', 'neuroticism', 'openness']
+        
+        for trait in required_traits:
+            if trait not in traits:
+                logger.error(f"Tratto mancante: {trait}")
+                return jsonify({"error": f"Tratto mancante: {trait}"}), 400
+            try:
+                traits[trait] = float(traits[trait])
+            except (ValueError, TypeError):
+                logger.error(f"Valore non valido per il tratto {trait}: {traits[trait]}")
+                return jsonify({"error": f"Il valore del tratto {trait} deve essere numerico"}), 400
+        
+        dt_data = {
+            'cf': data['cf'],
+            'first_name': data['first_name'],
+            'last_name': data['last_name'],
+            'traits': traits
+        }
+
+        for date_field in ['creation_datetime', 'last_update_datetime', 'last_training_datetime']:
+            if date_field in data and data[date_field]:
+                try:
+                    dt_data[date_field] = datetime.datetime.fromisoformat(data[date_field].replace('Z', '+00:00'))
+                except ValueError as e:
+                    logger.error(f"Formato data non valido per {date_field}: {data[date_field]}")
+                    return jsonify({"error": f"Formato data non valido per {date_field}. Usare formato ISO 8601."}), 400
+        
+        logger.info(f"Registrazione digital twin per CF: {data['cf']}")
+        dt_id = mongodb_service.register_digital_twin(dt_data)
+        
+        if dt_id:
+            response = {
+                "status": "success",
+                "message": f"Digital twin registrato con successo per CF: {data['cf']}",
+                "digital_twin_id": dt_id,
+                "cf": data['cf']
+            }
+            logger.info(f"Digital twin registrato con successo: {response}")
+            return jsonify(response)
+        else:
+            logger.error("Errore durante la registrazione del digital twin")
+            return jsonify({"error": "Errore durante la registrazione del digital twin"}), 500
+    
+    except ValueError as e:
+        logger.error(f"Errore di validazione durante la registrazione: {e}")
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Errore durante la registrazione del digital twin: {e}", exc_info=True)
+        return jsonify({
+            "error": f"Errore durante la registrazione del digital twin: {str(e)}",
+            "details": "Controlla che tutti i dati siano corretti e che il CF non sia già registrato"
+        }), 500
+
+@app.route('/digital-twin/predict', methods=['POST'])
+def predict_by_digital_twin():
+    """
+    Endpoint per la predizione basata su digital twin tramite codice fiscale.
+    
+    Input JSON:
+    {
+        "cf": str
+    }
+    
+    Returns:
+        JSON: Predizione della suscettibilità al phishing, predizioni dei singoli modelli e dati del digital twin
+    """
+    logger.info("Richiesta ricevuta per l'endpoint /digital-twin/predict")
+    
+    try:
+        data = request.get_json()
+        logger.info(f"Dati ricevuti per predizione digital twin: {json.dumps(data, indent=2)}")
+        
+        if not data or 'cf' not in data:
+            logger.error("Codice fiscale mancante nella richiesta di predizione digital twin")
+            return jsonify({"error": "Codice fiscale mancante. È richiesto un JSON con il campo 'cf'."}), 400
+        
+        cf = data['cf']
+        if not cf or not isinstance(cf, str):
+            logger.error(f"Codice fiscale non valido: {cf}")
+            return jsonify({"error": "Il codice fiscale deve essere una stringa non vuota"}), 400
+        
+        logger.info(f"Avvio inferenza per digital twin con CF: {cf}")
+        result, model_predictions, digital_twin = execute_inference_pipeline_by_cf(cf)
+        
+        result = float(result)
+        
+        response = {
+            "susceptibility_score": result,
+            "model_predictions": {k: float(v) if v is not None else None 
+                                for k, v in model_predictions.items()},
+            "digital_twin": {
+                "cf": digital_twin['cf'],
+                "first_name": digital_twin['first_name'],
+                "last_name": digital_twin['last_name'],
+                "traits": digital_twin['traits'],
+                "last_training_datetime": digital_twin.get('last_training_datetime'),
+                "last_update_datetime": digital_twin.get('last_update_datetime')
+            }
+        }
+        
+        prediction_record = {
+            "cf": cf,
+            "digital_twin_id": str(digital_twin['_id']),
+            "prediction": result,
+            "model_predictions": response["model_predictions"],
+            "timestamp": datetime.datetime.now()
+        }
+        mongodb_service.save_prediction(prediction_record)
+        
+        logger.info(f"Predizione digital twin completata con successo per CF {cf}. Risultato: {result}")
+        logger.info(f"Risposta completa: {json.dumps(response, indent=2, default=str)}")
+        return jsonify(response)
+    
+    except ValueError as e:
+        logger.error(f"Errore di validazione durante la predizione digital twin: {e}")
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logger.error(f"Errore durante la predizione digital twin: {e}", exc_info=True)
+        return jsonify({
+            "error": f"Errore durante la predizione digital twin: {str(e)}",
+            "details": "Controlla che il codice fiscale sia corretto e che il digital twin esista"
+        }), 500
+
+@app.route('/digital-twin/<cf>', methods=['GET'])
+def get_digital_twin(cf):
+    """
+    Endpoint per recuperare i dati di un digital twin tramite codice fiscale.
+    
+    Returns:
+        JSON: Dati del digital twin
+    """
+    logger.info(f"Richiesta ricevuta per l'endpoint /digital-twin/{cf}")
+    
+    try:
+        if not cf:
+            logger.error("Codice fiscale mancante nella richiesta")
+            return jsonify({"error": "Codice fiscale mancante"}), 400
+        
+        digital_twin = mongodb_service.get_digital_twin_by_cf(cf)
+        
+        if not digital_twin:
+            logger.warning(f"Digital twin non trovato per CF: {cf}")
+            return jsonify({"error": f"Digital twin non trovato per CF: {cf}"}), 404
+        
+        digital_twin.pop('_id', None)
+        
+        logger.info(f"Digital twin recuperato con successo per CF: {cf}")
+        return jsonify(digital_twin)
+    
+    except Exception as e:
+        logger.error(f"Errore durante il recupero del digital twin per CF {cf}: {e}", exc_info=True)
+        return jsonify({
+            "error": f"Errore durante il recupero del digital twin: {str(e)}"
+        }), 500
 
 if __name__ == "__main__":
     if initialize_app():
