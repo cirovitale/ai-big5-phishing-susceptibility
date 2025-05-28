@@ -110,12 +110,16 @@ class MongoDBService:
         logger.info(f"Operazione completata: {num_inserted} record inseriti, {num_updated} record aggiornati")
         return num_inserted, num_updated
     
-    def get_all_records(self):
+    def get_all_dataset_records(self):
         """
-        Recupera tutti i record dalla collezione dataset di MongoDB.
+        Recupera tutti i record dal dataset di personalità dalla collezione dataset di MongoDB.
         
         Returns:
-            list: Lista di tutti i record nella collezione.
+            list: Lista di tutti i record del dataset nella collezione, con i campi 'raw_data' rimossi per efficienza.
+            
+        Raises:
+            RuntimeError: Se la collezione dataset non è stata selezionata.
+            Exception: Se si verificano errori durante il recupero dei dati da MongoDB.
         """
         try:
             if self.dataset_collection is None:
@@ -128,11 +132,11 @@ class MongoDBService:
             for record in records:
                 record.pop('raw_data', None)
 
-            logger.info(f"Recuperati {len(records)} record da MongoDB")
+            logger.info(f"Recuperati {len(records)} record del dataset da MongoDB")
             return records
         
         except Exception as e:
-            logger.error(f"Errore durante il recupero dei record da MongoDB: {e}")
+            logger.error(f"Errore durante il recupero dei record del dataset da MongoDB: {e}")
             raise
     
     def close_connection(self):
@@ -177,13 +181,22 @@ class MongoDBService:
 
     def get_record_count(self):
         """
-        Restituisce il numero di record nella collezione dataset.
+        Restituisce il numero di record del dataset nella collezione dataset.
         
         Returns:
-            int: Numero di record nel dataset
+            int: Numero di record del dataset nella collezione
+            
+        Raises:
+            RuntimeError: Se la collezione dataset non è stata selezionata
         """
         try:
-            return self.db[self.dataset_collection].count_documents({})
+            if self.dataset_collection is None:
+                logger.error("Collezione dataset non selezionata")
+                raise RuntimeError("Collezione dataset non selezionata. Chiamare select_database_and_collections() prima.")
+            
+            count = self.dataset_collection.count_documents({})
+            logger.debug(f"Conteggio record del dataset: {count}")
+            return count
         except Exception as e:
-            logger.error(f"Errore durante il conteggio dei record: {e}")
+            logger.error(f"Errore durante il conteggio dei record del dataset: {e}")
             return 0

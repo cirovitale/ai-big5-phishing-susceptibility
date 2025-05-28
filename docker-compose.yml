@@ -26,6 +26,7 @@ services:
     volumes:
       - ./dataset:/app/dataset
       - ./logs:/logs
+      - ./models:/app/models
     depends_on:
       - mongodb
     restart: always

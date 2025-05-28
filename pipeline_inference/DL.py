@@ -22,32 +22,79 @@ class DLProcessor(InferencePipelineBase):
     Processor per predirre la suscettibilità dell'utente con tecniche di DL.
     """
     
-    def __init__(self, model_path=None):
+    def __init__(self, auto_load=True):
         """
         Inizializza il processor DL.
         
         Args:
-            model_path (str, optional): Percorso del modello salvato da caricare.
+            auto_load (bool): Se True, tenta di caricare automaticamente un modello esistente.
         """
         super().__init__(name="DLProcessor")
+        self.scaler = None
+        self.model = None
+        self.data = None
+        self.records = None
         
-        if model_path and os.path.exists(model_path):
-            self.load_model(model_path)
+        # Tentativo di caricamento automatico del modello
+        if auto_load:
+            models_dir = self._get_models_directory()
+            keras_path = os.path.join(models_dir, "DL_model.h5")
+            scaler_path = os.path.join(models_dir, "DL_scaler.pkl")
+            
+            if os.path.exists(keras_path) and os.path.exists(scaler_path):
+                try:
+                    self.load_model(models_dir)
+                    logger.info("Modello DL caricato automaticamente")
+                except Exception as e:
+                    logger.warning(f"Impossibile caricare il modello automaticamente: {e}")
+                    self._initialize_new_model()
+            else:
+                logger.info("Nessun modello DL esistente trovato, inizializzazione nuovo modello")
+                self._initialize_new_model()
         else:
-            self.scaler = StandardScaler()
-            self.model = Sequential([
-                Dense(32, activation='relu', input_shape=(5,)),
-                Dense(16, activation='relu'),
-                Dense(1, activation='sigmoid')  
-            ])
-            logger.info(f"Inizializzato processor DL")
+            self._initialize_new_model()
+    
+    def _get_models_directory(self):
+        """
+        Ottiene la directory dei modelli.
+        
+        Returns:
+            str: Percorso della directory dei modelli.
+        """
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.normpath(os.path.join(script_dir, os.pardir, "models"))
+    
+    def _initialize_new_model(self):
+        """
+        Inizializza un nuovo modello DL non addestrato.
+        """
+        self.scaler = StandardScaler()
+        self.model = Sequential([
+            Dense(32, activation='relu', input_shape=(5,)),
+            Dense(16, activation='relu'),
+            Dense(1, activation='sigmoid')  
+        ])
+        logger.info("Inizializzato nuovo processor DL")
+    
+    def is_trained(self):
+        """
+        Verifica se il modello è stato addestrato.
+        
+        Returns:
+            bool: True se il modello è addestrato, False altrimenti.
+        """
+        return (self.model is not None and 
+                self.scaler is not None and
+                hasattr(self.scaler, 'mean_') and
+                self.data is not None and 
+                self.records is not None)
     
     def save_model(self, path=None):
         """
-        Salva il modello DL su disco.
+        Salva il modello DL e i dati di addestramento su disco.
         
         Args:
-            path (str, optional): Percorso dove salvare il modello. Se None, usa un nome predefinito.
+            path (str, optional): Directory dove salvare il modello. Se None, usa la directory predefinita.
             
         Returns:
             str: Percorso dove è stato salvato il modello.
@@ -55,24 +102,36 @@ class DLProcessor(InferencePipelineBase):
         Raises:
             RuntimeError: Se il modello non è stato addestrato.
         """
-        if self.model is None:
-            raise RuntimeError("Nessun modello da salvare. Addestrare prima il modello.")
+        if not self.is_trained():
+            raise RuntimeError("Nessun modello addestrato da salvare. Addestrare prima il modello.")
         
         try:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            models_dir = os.path.normpath(os.path.join(script_dir, os.pardir, "models"))
-            if not os.path.exists(models_dir):
-                os.makedirs(models_dir)
-                logger.info(f"Creata directory {models_dir}")
+            if path is None:
+                path = self._get_models_directory()
+            
+            if not os.path.exists(path):
+                os.makedirs(path)
+                logger.info(f"Creata directory {path}")
 
-            keras_path = os.path.join(models_dir, "DL_model.h5")
+            # Salvataggio modello Keras
+            keras_path = os.path.join(path, "DL_model.h5")
             self.model.save(keras_path)
 
-            scaler_path = os.path.join(models_dir, "DL_scaler.pkl")
+            # Salvataggio scaler
+            scaler_path = os.path.join(path, "DL_scaler.pkl")
             joblib.dump(self.scaler, scaler_path)
+            
+            # Salvataggio dati di addestramento per SHAP
+            data_path = os.path.join(path, "DL_training_data.pkl")
+            training_data = {
+                'data': self.data,
+                'records': self.records
+            }
+            joblib.dump(training_data, data_path)
 
             logger.info(f"Modello DL salvato in: {keras_path}")
             logger.info(f"Scaler salvato in: {scaler_path}")
+            logger.info(f"Dati di addestramento salvati in: {data_path}")
             return path
         except Exception as e:
             logger.error(f"Errore durante il salvataggio del modello: {e}")
@@ -83,21 +142,31 @@ class DLProcessor(InferencePipelineBase):
         Carica un modello DL precedentemente salvato.
         
         Args:
-            path (str): Percorso del modello da caricare.
+            path (str): Directory contenente i file del modello.
             
         Raises:
-            FileNotFoundError: Se il file del modello non esiste.
+            FileNotFoundError: Se i file del modello non esistono.
         """
-        try:     
+        try:
             keras_path = os.path.join(path, "DL_model.h5")
-            scaler_path = os.path.join(path, "DL_scaler.pkl")     
+            scaler_path = os.path.join(path, "DL_scaler.pkl")
+            data_path = os.path.join(path, "DL_training_data.pkl")
+            
+            # Caricamento modello Keras
             self.model = keras_load_model(keras_path)
+            
+            # Caricamento scaler
             self.scaler = joblib.load(scaler_path)
-
-            self.model = joblib.load(path)
+            
+            # Caricamento dati di addestramento se disponibili
+            if os.path.exists(data_path):
+                training_data = joblib.load(data_path)
+                self.data = training_data['data']
+                self.records = training_data['records']
+            
             logger.info(f"Modello DL caricato da: {path}")
-        except FileNotFoundError:
-            logger.error(f"File del modello non trovato: {path}")
+        except FileNotFoundError as e:
+            logger.error(f"File del modello non trovato: {e}")
             raise
         except Exception as e:
             logger.error(f"Errore durante il caricamento del modello: {e}")
@@ -117,6 +186,9 @@ class DLProcessor(InferencePipelineBase):
             ValueError: Se i record non hanno il formato atteso.
         """
         try:
+            if not records:
+                raise ValueError("La lista dei record non può essere vuota")
+            
             self.records = records
             personality_vectors = []
             criticality_vector = []
@@ -133,16 +205,23 @@ class DLProcessor(InferencePipelineBase):
                     traits.get('neuroticism', 0),
                     traits.get('openness', 0)
                 ]
-                criticality = record['criticality_index']
+                criticality = record.get('criticality_index', 0)
                 personality_vectors.append(vector)
                 criticality_vector.append(criticality)
             
             self.data = np.array(personality_vectors)
+            
+            # Se il modello non è inizializzato, crealo
+            if self.model is None or self.scaler is None:
+                self._initialize_new_model()
+            
+            # Addestramento
             X_scaled = self.scaler.fit_transform(self.data)
             y = np.clip(np.array(criticality_vector), 0, 1)
 
             self.model.compile(optimizer=Adam(learning_rate=0.001), loss='mean_squared_error')
             self.model.fit(X_scaled, y, epochs=50, batch_size=8, verbose=0)
+            
             self.save_model()
             logger.info(f"Modello DL addestrato su {len(records)} record")
             return self
@@ -163,15 +242,17 @@ class DLProcessor(InferencePipelineBase):
             
         Raises:
             ValueError: Se i dati di input non hanno il formato corretto
+            RuntimeError: Se il modello non è addestrato
         """
-        if isinstance(traits, dict):
-            logger.info(f"Avvio procedura predizione criticità mediante DL")
-        else:
+        if not isinstance(traits, dict):
             raise ValueError("Formato tratti di personalità non valido")
-        if self.model is None or self.scaler is None:
-            raise RuntimeError("Modello o scaler non inizializzati. Caricare o addestrare prima il modello.")
+        
+        if not self.is_trained():
+            raise RuntimeError("Il modello DL deve essere addestrato prima di effettuare predizioni")
         
         try:
+            logger.info("Avvio procedura predizione criticità mediante DL")
+            
             x_input = np.array([[
                 traits.get('extraversion', 0),
                 traits.get('agreeableness', 0),
@@ -185,17 +266,20 @@ class DLProcessor(InferencePipelineBase):
 
             logger.info(f"Processo DL completato. Indice di criticità stimato: {prediction:.4f}")
 
-
-            explanation = self.explain(traits)
-            logger.info(f"Baseline: {explanation['expected_value']:.4f}, Predizione: {explanation['predicted_value']:.4f}")
-            for name, val in explanation['shap_values'].items():
-                logger.info(f"{name:20s}: {val:+.4f}")
+            # Explanation con SHAP se i dati di addestramento sono disponibili
+            if self.data is not None:
+                try:
+                    explanation = self.explain(traits)
+                    logger.info(f"Baseline: {explanation['expected_value']:.4f}, Predizione: {explanation['predicted_value']:.4f}")
+                    for name, val in explanation['shap_values'].items():
+                        logger.info(f"{name:20s}: {val:+.4f}")
+                except Exception as e:
+                    logger.warning(f"Impossibile generare explanation SHAP: {e}")
 
             return round(float(prediction), 2)
         except Exception as e:
             logger.error(f"Errore durante il processo DL: {e}")
             raise
-
 
     def explain(self, traits):
         """
@@ -210,15 +294,14 @@ class DLProcessor(InferencePipelineBase):
         Raises:
             RuntimeError: Se i modelli non sono stati inizializzati
         """
-
-        if self.model is None or self.scaler is None:
+        if not self.is_trained():
             raise RuntimeError("Modello o scaler non inizializzati. Caricare o addestrare prima.")
 
         feature_names = ['extraversion', 'agreeableness', 'conscientiousness', 'neuroticism', 'openness']
         x_input = np.array([[traits.get(f, 0) for f in feature_names]])
         x_scaled = self.scaler.transform(x_input)
 
-        if hasattr(self, 'data') and self.data is not None:
+        if self.data is not None:
             num_background_samples = min(50, self.data.shape[0])
             background_unscaled = self.data[:num_background_samples]
             background_scaled = self.scaler.transform(background_unscaled)
@@ -258,7 +341,6 @@ class DLProcessor(InferencePipelineBase):
             )
         except Exception as plot_error:
             logger.warning(f"Impossibile generare il plot SHAP waterfall: {plot_error}")
-
 
         return {
             "expected_value": expected_value,

@@ -53,7 +53,7 @@ def execute_extraction_preprocessing_pipeline(process_form=False, process_excel=
     try:
         # Elaborazione dati dal form Google
         if process_form:
-            # TODO al momento non è stata implementata l'interazione con Google, avendo già il dataset presente in letteratura
+            # TODO
             pass
         
         # Elaborazione dati dal dataset Excel
@@ -77,15 +77,99 @@ def execute_extraction_preprocessing_pipeline(process_form=False, process_excel=
         logger.error(f"Errore durante l'estrazione dei dati: {e}", exc_info=True)
         return []
 
+def execute_training_pipeline():
+    """
+    Esegue la pipeline di addestramento per i modelli KNN e DL.
+    
+    Questa funzione addestra i modelli utilizzando tutti i dati del dataset di personalità
+    disponibili in MongoDB e salva i modelli addestrati nella directory /models per uso futuro.
+    
+    Returns:
+        dict: Risultati dell'addestramento con informazioni sui modelli addestrati
+        
+    Raises:
+        Exception: Se si verificano errori durante l'addestramento
+    """
+    logger.info("Avvio pipeline di addestramento")
+    
+    training_results = {
+        'status': 'success',
+        'models_trained': [],
+        'errors': []
+    }
+    
+    try:
+        # Recupera tutti i dati del dataset da MongoDB
+        data = mongodb_service.get_all_dataset_records()
+        if not data:
+            error_msg = "Nessun dato del dataset disponibile in MongoDB per l'addestramento"
+            logger.error(error_msg)
+            training_results['status'] = 'error'
+            training_results['errors'].append(error_msg)
+            return training_results
+        
+        logger.info(f"Recuperati {len(data)} record del dataset da MongoDB per l'addestramento")
+        
+        # Addestramento KNN
+        try:
+            logger.info("Avvio addestramento modello KNN")
+            knn_processor = KNNProcessor(auto_load=False)  # Non caricare modello esistente
+            knn_processor.fit(data)
+            training_results['models_trained'].append('KNN')
+            logger.info("Addestramento KNN completato con successo")
+        except Exception as e:
+            error_msg = f"Errore durante l'addestramento KNN: {e}"
+            logger.error(error_msg, exc_info=True)
+            training_results['errors'].append(error_msg)
+        
+        # Addestramento DL
+        try:
+            logger.info("Avvio addestramento modello DL")
+            dl_processor = DLProcessor(auto_load=False)  # Non caricare modello esistente
+            dl_processor.fit(data)
+            training_results['models_trained'].append('DL')
+            logger.info("Addestramento DL completato con successo")
+        except Exception as e:
+            error_msg = f"Errore durante l'addestramento DL: {e}"
+            logger.error(error_msg, exc_info=True)
+            training_results['errors'].append(error_msg)
+        
+        # Status Finale
+        if training_results['errors']:
+            if training_results['models_trained']:
+                training_results['status'] = 'partial_success'
+                logger.warning("Addestramento completato parzialmente con alcuni errori")
+            else:
+                training_results['status'] = 'error'
+                logger.error("Addestramento fallito per tutti i modelli")
+        else:
+            logger.info("Addestramento completato con successo per tutti i modelli")
+        
+        return training_results
+        
+    except Exception as e:
+        error_msg = f"Errore critico durante la pipeline di addestramento: {e}"
+        logger.error(error_msg, exc_info=True)
+        training_results['status'] = 'error'
+        training_results['errors'].append(error_msg)
+        return training_results
+
 def execute_inference_pipeline(query_traits):
     """
     Esegue la pipeline di inferenza sui tratti del soggetto in esame.
+    
+    Carica i modelli precedentemente addestrati e li utilizza per fare predizioni.
+    Se i modelli non esistono, avvia automaticamente l'addestramento utilizzando
+    i dati del dataset di personalità disponibili in MongoDB.
     
     Args:
         query_traits (dict): Tratti di personalità su cui inferire
         
     Returns:
         tuple: (float, dict) - Valore finale calcolato dall'ensemble e predizioni dei singoli modelli
+        
+    Raises:
+        Exception: Se si verificano errori durante l'inferenza
     """
     logger.info("Avvio pipeline di inference")
 
@@ -93,12 +177,17 @@ def execute_inference_pipeline(query_traits):
     
     # KNN
     try:
-        knn_processor = KNNProcessor()
-        data = mongodb_service.get_all_records()
-
-        knn_processor.fit(data)
-        knn_result = knn_processor.process(query_traits)
+        knn_processor = KNNProcessor(auto_load=True)
         
+        # Verifica se il modello è addestrato
+        if not knn_processor.is_trained():
+            logger.warning("Modello KNN non addestrato, avvio addestramento automatico")
+            data = mongodb_service.get_all_dataset_records()
+            if not data:
+                raise RuntimeError("Nessun dato del dataset disponibile per l'addestramento automatico del modello KNN")
+            knn_processor.fit(data)
+        
+        knn_result = knn_processor.process(query_traits)
         logger.info(f"KNN result: {knn_result}")
         predictions['KNN'] = knn_result
     except Exception as e:
@@ -129,12 +218,17 @@ def execute_inference_pipeline(query_traits):
     
     # DL
     try:
-        dl_processor = DLProcessor()
-        data = mongodb_service.get_all_records()
-
-        dl_processor.fit(data)
-        dl_result = dl_processor.process(query_traits)
+        dl_processor = DLProcessor(auto_load=True)
         
+        # Verifica se il modello è addestrato
+        if not dl_processor.is_trained():
+            logger.warning("Modello DL non addestrato, avvio addestramento automatico")
+            data = mongodb_service.get_all_dataset_records()
+            if not data:
+                raise RuntimeError("Nessun dato del dataset disponibile per l'addestramento automatico del modello DL")
+            dl_processor.fit(data)
+        
+        dl_result = dl_processor.process(query_traits)
         logger.info(f"DL result: {dl_result}")
         predictions['DL'] = dl_result
     except Exception as e:
@@ -151,24 +245,26 @@ def execute_inference_pipeline(query_traits):
     except Exception as e:
         logger.error(f"Errore durante il calcolo dell'ensemble: {e}", exc_info=True)
         return 0, predictions
-    
 
 def execute_testing_pipeline():
     """
-    Esegue la pipeline di testing utilizzando tutti i record in MongoDB.
+    Esegue la pipeline di testing utilizzando tutti i record del dataset in MongoDB.
     
     Returns:
         dict: Metriche di valutazione del modello (accuracy, precision, recall, f1_score)
+        
+    Raises:
+        Exception: Se si verificano errori durante il testing
     """
     logger.info("Avvio pipeline di testing")
     
     try:
-        records = mongodb_service.get_all_records()
+        records = mongodb_service.get_all_dataset_records()
         if not records:
-            logger.error("Nessun record trovato in MongoDB per il testing")
+            logger.error("Nessun record del dataset trovato in MongoDB per il testing")
             return None
         
-        logger.info(f"Recuperati {len(records)} record da MongoDB per il testing")
+        logger.info(f"Recuperati {len(records)} record del dataset da MongoDB per il testing")
         
         true_values = []
         predictions = []
@@ -375,10 +471,75 @@ def testing():
             "details": "Errore nell'elaborazione delle metriche"
         }), 500
     
-@app.route('/training', methods=['GET'])
+@app.route('/training', methods=['POST'])
 def training():
-    return True
-    #TODO
+    """
+    Endpoint per l'addestramento dei modelli di machine learning.
+    
+    Questo endpoint avvia la pipeline di addestramento per i modelli KNN e DL,
+    utilizzando tutti i dati disponibili in MongoDB. I modelli addestrati vengono
+    salvati nella directory /models per uso futuro.
+    
+    Returns:
+        JSON: Risposta contenente:
+            - status: 'success', 'partial_success', o 'error'
+            - models_trained: Lista dei modelli addestrati con successo
+            - errors: Lista degli errori verificatisi durante l'addestramento
+            - message: Messaggio descrittivo del risultato
+            
+        Status codes:
+            - 200: Addestramento completato (con successo o parziale)
+            - 500: Errore critico durante l'addestramento
+    """
+    logger.info("Richiesta ricevuta per l'endpoint /training")
+    
+    try:
+        logger.info("Avvio esecuzione pipeline di addestramento")
+        training_results = execute_training_pipeline()
+        
+        # Preparazione risposta
+        if training_results['status'] == 'success':
+            response = {
+                "status": "success",
+                "message": f"Addestramento completato con successo per {len(training_results['models_trained'])} modelli",
+                "models_trained": training_results['models_trained'],
+                "errors": []
+            }
+            status_code = 200
+            logger.info("Pipeline di addestramento completata con successo")
+            
+        elif training_results['status'] == 'partial_success':
+            response = {
+                "status": "partial_success", 
+                "message": f"Addestramento parzialmente completato. {len(training_results['models_trained'])} modelli addestrati, {len(training_results['errors'])} errori",
+                "models_trained": training_results['models_trained'],
+                "errors": training_results['errors']
+            }
+            status_code = 200
+            logger.warning("Pipeline di addestramento completata parzialmente")
+            
+        else:  # status == 'error'
+            response = {
+                "status": "error",
+                "message": "Addestramento fallito per tutti i modelli",
+                "models_trained": [],
+                "errors": training_results['errors']
+            }
+            status_code = 500
+            logger.error("Pipeline di addestramento fallita")
+        
+        logger.info(f"Risposta addestramento: {json.dumps(response, indent=2)}")
+        return jsonify(response), status_code
+        
+    except Exception as e:
+        error_msg = f"Errore critico durante l'addestramento: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": error_msg,
+            "models_trained": [],
+            "errors": [error_msg]
+        }), 500
 
 def initialize_database():
     """

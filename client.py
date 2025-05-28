@@ -7,7 +7,7 @@ import json
 # URL base del server
 BASE_URL = "http://127.0.0.1:5000"
 
-def test_predict():
+def predict():
     input_data = {
         "traits": {
             "extraversion": 0.8,
@@ -25,7 +25,7 @@ def test_predict():
     )
     print(json.dumps(response.json(), indent=2))
 
-def test_extract():
+def extract():
     input_data = {
         "process_form": False,
         "process_excel": True
@@ -37,21 +37,28 @@ def test_extract():
     )
     print(json.dumps(response.json(), indent=2))
 
-def test_testing():
+def testing():
     response = requests.get(f"{BASE_URL}/testing")
+    print(json.dumps(response.json(), indent=2))
+
+def training():
+    response = requests.post(f"{BASE_URL}/training")
     print(json.dumps(response.json(), indent=2))
 
 def run_all_tests():
     """Esegue tutti i test delle chiamate presenti"""
+
+    # print("\n1. Extract")
+    # extract()
     
-    print("\n1. Test Predict")
-    test_predict()
+    # print("\n2. Training")
+    # training()
     
-    # print("\n2. Test Extract")
-    # test_extract()
-    
-    #print("\n3. Test Testing")
-    #test_testing()
+    # print("\n3. Predict")
+    # predict()
+
+    print("\n4. Testing")
+    testing()
 
 if __name__ == "__main__":
     run_all_tests()

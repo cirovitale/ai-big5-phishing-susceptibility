@@ -204,15 +204,15 @@ def plot_ocean_boxplots_by_susceptibility(df, threshold=CRITICALITY_THRESHOLD):
 
 def main():
     """
-    Analisi dei dati dopo la normalizzazione del dataset originale.
+    Esegue l'analisi completa dei dati del dataset di personalità dopo la normalizzazione.
     """
     mongodb_service = MongoDBService()
     mongodb_service.connect()
-    documents = mongodb_service.get_all_records()
+    documents = mongodb_service.get_all_dataset_records()
     if not documents:
-        logging.warning("Nessun documento trovato nel database.")
+        logging.warning("Nessun documento del dataset trovato nel database.")
         return
-    logging.info(f"Trovati {len(documents)} documenti.")
+    logging.info(f"Trovati {len(documents)} documenti del dataset.")
     df = extract_personality_traits(documents)
     print_dataframe_head(df)
     print_descriptive_statistics(df)
