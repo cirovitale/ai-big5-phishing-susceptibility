@@ -28,21 +28,23 @@ class CriticalityIndexFormat(BaseModel):
 
 logger = logging.getLogger(__name__)
 
-class LLMPrediction(InferencePipelineBase):
+class LLMProcessor(InferencePipelineBase):
     """
     Processor per porre in analisi i tratti dell'utente ad un LLM e ricavarne l'indice di criticità
     """
     
-    def __init__(self, api_key=OPENAI_API_KEY):
+    def __init__(self, api_key=OPENAI_API_KEY, question=""):
         """
         Inizializza il processor LLM
         
         Args:
             api_key (str): Chiave dell'LLM utilizzato per la predizione dell'indice di criticità
+            question: Domanda utilizzata nei prompt
         """
-        super().__init__(name="LLMPrediction")
+        super().__init__(name="LLMProcessor")
         try:
             self.openai_client = OpenAI(api_key=api_key)
+            self.question = question
 
             self.MODEL = "gpt-4o-mini"
             self.embedder_service = EmbedderService()
@@ -144,7 +146,7 @@ class LLMPrediction(InferencePipelineBase):
             # self.plot_shap_summary_global(personality_vectors)
             # logger.info(f"SHAP globale applicato su LLM, memorizzato il grafico nella cartella 'charts'")
 
-            return round(cricitality_calculated, 2)
+            return round(cricitality_calculated, 2), textual_behaviour_predicted
         except Exception as e:
             logger.error(f"Errore durante il processo LLM: {e}")
             raise
@@ -174,7 +176,7 @@ class LLMPrediction(InferencePipelineBase):
             model=self.MODEL,
             messages=[
                 {"role": "system", "content": main_prompt},
-                {"role": "user", "content": f"Domanda: Come ti poni rispetto ad una nuova mail nella tua casella di posta, o un nuovo messaggio sul tuo servizio di messaggistica preferito? Pensa step by step prima di rispondere, facendo rigorosamente riferimento ai tratti e agli studi forniti. Rispondi in prima persona commettendo gli eventuali errori dell'utente sulla base della sua personalità, in breve descrivendo l'azione compiuta in base al contesto (positiva o negativa che sia), non fare considerazioni sulla bontà della risposta, rispondi solo in base a cosa farebbe l'utente analizzato in base ai suoi tratti. Limita la risposta a 400 lettere, senza includere citazioni ai punteggi. Voglio che tutta la risposta rispecchi un utente che sta parlando in prima persona di come si comporterebbe."}
+                {"role": "user", "content": f"Domanda: {self.question} Pensa step by step prima di rispondere, facendo rigorosamente riferimento ai tratti e agli studi forniti. Rispondi in prima persona commettendo gli eventuali errori dell'utente sulla base della sua personalità, in breve descrivendo l'azione compiuta in base al contesto (positiva o negativa che sia), non fare considerazioni sulla bontà della risposta, rispondi solo in base a cosa farebbe l'utente analizzato in base ai suoi tratti. Limita la risposta a 400 lettere, senza includere citazioni ai punteggi. Voglio che tutta la risposta rispecchi un utente che sta parlando in prima persona di come si comporterebbe."}
             ],
             response_format=ResponseFormat
         ).choices[0].message.content
@@ -183,9 +185,10 @@ class LLMPrediction(InferencePipelineBase):
 
         criticità = json.loads(criticità_raw) 
 
+        risposta_testuale_processed = json.loads(risposta_testuale)
 
         response = {}
-        response['risposta_testuale'] = risposta_testuale
+        response['risposta_testuale'] = risposta_testuale_processed['user_vulnerability_analyzer_answer']
         response['criticality_index'] = criticità['criticita']
 
         return response
@@ -297,47 +300,6 @@ class LLMPrediction(InferencePipelineBase):
 
         return criticalita
 
-    # tecnica utilizzata: zero-shot
-    def calculate_criticality_no_knowledge_studies(self, answer, traits):
-        """
-        Genera l'indice di criticità dell'utente. In questa funzione, non sono presenti citazioni agli studi fatti in letteratura.
-        
-        Args:
-            traits: Dizionario contenente i tratti di personalità dell'utente
-            answer: Descrizione testuale del comportamento dell'utente in esame
-            
-        Returns:
-            dict: criticità stimata
-            
-        """   
-
-        main_prompt = (
-            "Sei un esperto nell'assegnazione di indici di criticità ai comportamenti dei dipendenti, valutati attraverso l'analisi dei tratti psicologici dell'utente riassunti con il modello OCEAN insieme ad una breve descrizione di come esso si comporterebbe di fronte ad uno scenario generico di phishing. Valuta queste due cose per poter assegnare un valore all'indice di criticità. "
-        )
-
-        criticalita = self.openai_client.beta.chat.completions.parse(
-            model=self.MODEL,
-            messages=[
-                {"role": "system", "content": main_prompt},
-                {"role": "user", "content": f"Tratti dell'utente in esame: {traits}"},
-                {"role": "user", "content": f"Comportamento dell'utente in esame: {answer}"},
-                {"role": "user", "content": f"Sulla base degli esempi forniti, e sui dati dell'utente (tratti, comportamento), assegna un indice di criticità (valore compreso tra 0 e 1). Pensa step by step prima di rispondere."}
-            ],
-            response_format=CriticalityIndexFormat
-        ).choices[0].message.content
-
-        print(self.openai_client.beta.chat.completions.parse(
-            model=self.MODEL,
-            messages=[
-                {"role": "system", "content": main_prompt},
-                {"role": "user", "content": f"Tratti dell'utente in esame: {traits}"},
-                {"role": "user", "content": f"Comportamento dell'utente in esame: {answer}"},
-                {"role": "user", "content": f"Sulla base degli esempi forniti, e sui dati dell'utente (tratti, comportamento), assegna un indice di criticità (valore compreso tra 0 e 1). Pensa step by step prima di rispondere."}
-            ],
-        ).choices[0].message.content)
-
-        return criticalita
-
     # Self consistency (scartato perchè non mostrava miglioramenti)
     def calculate_criticality_majority(self, answer, traits, n=5):
         """
@@ -347,7 +309,7 @@ class LLMPrediction(InferencePipelineBase):
         Args:
             answer: testo di comportamento dell'utente.
             traits: tratti dell'utente in esame
-            n: numero di traiettorie di sampling.
+            n: numero di samples utilizzati per il calcolo.
 
         Returns:
             dict: Indice di criticità medio degli n campionamenti
@@ -361,7 +323,7 @@ class LLMPrediction(InferencePipelineBase):
                 if isinstance(parsed, dict) and "criticita" in parsed:
                     criticities.append(parsed["criticita"])
             except json.JSONDecodeError:
-                logger.warning("Risposta critica non valida, salto questa iterazione.")
+                logger.warning("Risposta non valida a causa di un errore, salto questa iterazione.")
         if criticities:
             print(criticities)
             final_value = float(np.median(criticities))

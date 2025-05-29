@@ -8,8 +8,8 @@ import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from config import validate_configuration, LOG_LEVEL, MONGODB_COLLECTION_DT
-from pipeline_inference.DL import DLProcessor
-from pipeline_inference.llm_for_prediction import LLMPrediction
+from pipeline_inference.dl import DLProcessor
+from pipeline_inference.llm import LLMProcessor
 from services.mongodb_service import MongoDBService
 from pipeline_preprocessing.dataset_excel import ExcelDataProcessor
 from pipeline_inference.knn import KNNProcessor
@@ -154,7 +154,7 @@ def execute_training_pipeline():
         training_results['errors'].append(error_msg)
         return training_results
 
-def execute_inference_pipeline(query_traits):
+def execute_inference_pipeline(query_traits, sel_question):
     """
     Esegue la pipeline di inferenza sui tratti del soggetto in esame.
     
@@ -164,6 +164,7 @@ def execute_inference_pipeline(query_traits):
     
     Args:
         query_traits (dict): Tratti di personalità su cui inferire
+        sel_question: Domanda da utilizzare per il LLM 
         
     Returns:
         tuple: (float, dict) - Valore finale calcolato dall'ensemble e predizioni dei singoli modelli
@@ -174,6 +175,7 @@ def execute_inference_pipeline(query_traits):
     logger.info("Avvio pipeline di inference")
 
     predictions = {}
+    question = sel_question
     
     # KNN
     try:
@@ -207,11 +209,11 @@ def execute_inference_pipeline(query_traits):
     
     # LLM
     try:
-        llm_predictor = LLMPrediction()
-        llm_predictor_result = llm_predictor.process(query_traits)
+        llm_processor = LLMProcessor(question=question)
+        llm_processor_result, predicted_behaviour = llm_processor.process(query_traits)
         
-        predictions['LLM'] = llm_predictor_result
-        logger.info(f"LLM RESULT: {llm_predictor_result}")
+        predictions['LLM'] = llm_processor_result
+        logger.info(f"LLM RESULT: {llm_processor_result}")
     except Exception as e:
         logger.error(f"Errore durante l'inferenza LLM: {e}", exc_info=True)
         predictions['LLM'] = None
@@ -241,15 +243,18 @@ def execute_inference_pipeline(query_traits):
         final_result = ensemble_processor.process(predictions)
         
         logger.info(f"ENSEMBLE RESULT: {final_result}")
-        return final_result, predictions
+        return final_result, predictions, predicted_behaviour
     except Exception as e:
         logger.error(f"Errore durante il calcolo dell'ensemble: {e}", exc_info=True)
         return 0, predictions
 
-def execute_testing_pipeline():
+def execute_testing_pipeline(sel_question):
     """
     Esegue la pipeline di testing utilizzando tutti i record del dataset in MongoDB.
     
+    Args:
+        sel_question: Domanda da utilizzare per il LLM 
+
     Returns:
         dict: Metriche di valutazione del modello (accuracy, precision, recall, f1_score)
         
@@ -266,6 +271,9 @@ def execute_testing_pipeline():
         
         logger.info(f"Recuperati {len(records)} record del dataset da MongoDB per il testing")
         
+        question = sel_question
+        logger.info(f"Query utilizzata per il testing: {question}")
+        
         true_values = []
         predictions = []
         
@@ -274,8 +282,8 @@ def execute_testing_pipeline():
                 traits = record['personality_traits']
                 criticality = record.get('criticality_index', 0)
                 
-                # Esegui l'inferenza per questo record
-                predicted_criticality, _ = execute_inference_pipeline(traits)
+                # Esegui l'inferenza per questo record (conserva solo criticità predetta)
+                predicted_criticality, t1, t2  = execute_inference_pipeline(traits, question)
                 
                 predictions.append(predicted_criticality)
                 true_values.append(criticality)
@@ -295,12 +303,13 @@ def execute_testing_pipeline():
         logger.error(f"Errore durante il testing: {e}", exc_info=True)
         return None
 
-def execute_inference_pipeline_by_cf(cf):
+def execute_inference_pipeline_by_cf(cf, question):
     """
     Esegue la pipeline di inferenza per un digital twin identificato dal codice fiscale.
     
     Args:
         cf (str): Codice fiscale del digital twin
+        question (str): Domanda effettuata al digital twin
         
     Returns:
         tuple: (float, dict, dict) - Valore finale calcolato dall'ensemble, predizioni dei singoli modelli, e dati del digital twin
@@ -309,7 +318,7 @@ def execute_inference_pipeline_by_cf(cf):
         ValueError: Se il digital twin non viene trovato
         Exception: Se si verificano errori durante l'inferenza
     """
-    logger.info(f"Avvio pipeline di inference per digital twin con CF: {cf}")
+    logger.info(f"Avvio pipeline di inference per digital twin con CF: {cf}. Domanda effettuata: {question}")
     
     try:
         # Recupera digital twin dal database
@@ -325,10 +334,10 @@ def execute_inference_pipeline_by_cf(cf):
         logger.info(f"Tratti recuperati per CF {cf}: {traits}")
         
         # Esegue l'inferenza utilizzando i tratti del digital twin
-        result, model_predictions = execute_inference_pipeline(traits)
+        result, model_predictions, predicted_behaviour = execute_inference_pipeline(traits, question)
         
         logger.info(f"Inferenza completata per digital twin CF {cf}: {result}")
-        return result, model_predictions, digital_twin
+        return result, model_predictions, predicted_behaviour, digital_twin
         
     except Exception as e:
         logger.error(f"Errore durante l'inferenza per digital twin CF {cf}: {e}", exc_info=True)
@@ -372,10 +381,11 @@ def predict():
             "openness": float
         },
         "cf": str (opzionale)
+        "question_for_prompt": str
     }
     
     Returns:
-        JSON: Predizione della suscettibilità al phishing e predizioni dei singoli modelli
+        JSON: Predizione della suscettibilità al phishing e predizioni dei singoli modelli; comportamento dell'utente identificato dal Digital Twin
     """
     logger.info("Richiesta ricevuta per l'endpoint /predict")
     try:
@@ -388,7 +398,8 @@ def predict():
         
         traits = data['traits']
         required_traits = ['extraversion', 'agreeableness', 'conscientiousness', 'neuroticism', 'openness']
-        
+        question = data['question_for_prompt']
+
         for trait in required_traits:
             if trait not in traits:
                 logger.error(f"Tratto mancante nella richiesta: {trait}")
@@ -400,14 +411,15 @@ def predict():
                 return jsonify({"error": f"Il valore del tratto {trait} deve essere numerico"}), 400
         
         logger.info("Avvio inferenza con i tratti forniti")
-        result, model_predictions = execute_inference_pipeline(traits)
+        result, model_predictions, predicted_behaviour = execute_inference_pipeline(traits, question)
         
         result = float(result)
         
         response = {
             "susceptibility_score": result,
             "model_predictions": {k: float(v) if v is not None else None 
-                                for k, v in model_predictions.items()}
+                                for k, v in model_predictions.items()},
+            "dt_response": predicted_behaviour
         }
         
         if 'cf' in data:
@@ -417,6 +429,7 @@ def predict():
                 "traits": traits,
                 "prediction": result,
                 "model_predictions": response["model_predictions"],
+                "dt_response": predicted_behaviour,
                 "timestamp": datetime.datetime.now()
             }
             mongodb_service.save_prediction(prediction_record)
@@ -472,11 +485,16 @@ def extract():
         logger.error(f"Errore durante l'estrazione dei dati: {e}", exc_info=True)
         return jsonify({"error": f"Errore durante l'estrazione dei dati: {str(e)}"}), 500
 
-@app.route('/testing', methods=['GET'])
+@app.route('/testing', methods=['POST'])
 def testing():
     """
     Endpoint per eseguire i test sul modello.
-    
+
+    Input JSON:
+    {
+        "question_for_prompt": str
+    }
+
     Returns:
         JSON: Risposta contenente le metriche di valutazione del modello:
             - accuracy: Accuratezza del modello
@@ -489,7 +507,16 @@ def testing():
     logger.info("Richiesta ricevuta per l'endpoint /testing")
     try:
         logger.info("Avvio esecuzione testing del modello")
-        metrics = execute_testing_pipeline()
+        data = request.get_json()
+        logger.info(f"Dati ricevuti: {json.dumps(data, indent=2)}")
+        
+        if 'question_for_prompt' not in data:
+            logger.error("Dati mancanti nella richiesta di testing")
+            return jsonify({"error": "Dati mancanti. È richiesto un JSON con il campo 'question_for_prompt'."}), 400
+
+        question = data['question_for_prompt']
+
+        metrics = execute_testing_pipeline(question)
         
         if not metrics:
             logger.error("Testing fallito: nessun dato disponibile")
@@ -736,6 +763,7 @@ def predict_by_digital_twin():
     Input JSON:
     {
         "cf": str
+        "question_for_prompt": str
     }
     
     Returns:
@@ -755,9 +783,10 @@ def predict_by_digital_twin():
         if not cf or not isinstance(cf, str):
             logger.error(f"Codice fiscale non valido: {cf}")
             return jsonify({"error": "Il codice fiscale deve essere una stringa non vuota"}), 400
-        
-        logger.info(f"Avvio inferenza per digital twin con CF: {cf}")
-        result, model_predictions, digital_twin = execute_inference_pipeline_by_cf(cf)
+        question = data['question_for_prompt']
+
+        logger.info(f"Avvio inferenza per digital twin con CF: {cf}. Domanda effettuata: {question}")
+        result, model_predictions, predicted_behaviour, digital_twin = execute_inference_pipeline_by_cf(cf, question)
         
         result = float(result)
         
@@ -765,6 +794,7 @@ def predict_by_digital_twin():
             "susceptibility_score": result,
             "model_predictions": {k: float(v) if v is not None else None 
                                 for k, v in model_predictions.items()},
+            "dt_response": predicted_behaviour,
             "digital_twin": {
                 "cf": digital_twin['cf'],
                 "first_name": digital_twin['first_name'],
@@ -780,6 +810,7 @@ def predict_by_digital_twin():
             "digital_twin_id": str(digital_twin['_id']),
             "prediction": result,
             "model_predictions": response["model_predictions"],
+            "dt_response": predicted_behaviour,
             "timestamp": datetime.datetime.now()
         }
         mongodb_service.save_prediction(prediction_record)

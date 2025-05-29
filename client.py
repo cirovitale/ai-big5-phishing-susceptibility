@@ -17,7 +17,8 @@ def predict():
             "neuroticism": 0.2,
             "openness": 0.2
             },
-        "cf": "test_user_1"
+        "cf": "test_user_1",
+        "question_for_prompt": "Come ti poni rispetto ad una nuova mail nella tua casella di posta, o un nuovo messaggio sul tuo servizio di messaggistica preferito?"
     }
     
     response = requests.post(
@@ -39,7 +40,10 @@ def extract():
     print(json.dumps(response.json(), indent=2))
 
 def testing():
-    response = requests.get(f"{BASE_URL}/testing")
+    input_data = {
+        "question_for_prompt": "Come ti poni rispetto ad una nuova mail nella tua casella di posta, o un nuovo messaggio sul tuo servizio di messaggistica preferito?"
+    }
+    response = requests.post(f"{BASE_URL}/testing", json=input_data)
     print(json.dumps(response.json(), indent=2))
 
 def training():
@@ -70,7 +74,8 @@ def register_digital_twin():
 
 def predict_by_digital_twin():
     input_data = {
-        "cf": "RSSMRA80L05F593A"
+        "cf": "RSSMRA80L05F593A",
+        "question_for_prompt": "Come ti poni rispetto ad una nuova mail nella tua casella di posta, o un nuovo messaggio sul tuo servizio di messaggistica preferito?"
     }
 
     response = requests.post(
@@ -94,20 +99,20 @@ def run_all_tests():
     # print("\n2. Training")
     # training()
     
-    print("\n3. Predict")
-    predict()
+    #print("\n3. Predict")
+    #predict()
 
-    # print("\n4. Testing")
-    # testing()
+    print("\n4. Testing")
+    testing()
 
-    # print("\n5. Register Digital Twin")
-    # register_digital_twin()
+    #print("\n5. Register Digital Twin")
+    #register_digital_twin()
 
-    # print("\n6. Get Digital Twin")
-    # get_digital_twin()
+    #print("\n6. Get Digital Twin")
+    #get_digital_twin()
 
-    # print("\n7. Predict by Digital Twin")
-    # predict_by_digital_twin()
+    #print("\n7. Predict by Digital Twin")
+    #predict_by_digital_twin()
 
 if __name__ == "__main__":
     run_all_tests()
