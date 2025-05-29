@@ -54,6 +54,7 @@ MONGODB_URI_PASSWORD=password
 MONGODB_DB=ai-bi5-phishing-susceptibility
 MONGODB_COLLECTION_INFERENCE=prediction
 MONGODB_COLLECTION_DATASET=dataset
+MONGODB_COLLECTION_DT=digital-twin
 
 # Dataset Processing
 DATASET_PATH = dataset/Dataset.xlsx
@@ -168,6 +169,7 @@ MONGODB_URI_PASSWORD=password
 MONGODB_DB=ai-bi5-phishing-susceptibility
 MONGODB_COLLECTION_INFERENCE=prediction
 MONGODB_COLLECTION_DATASET=dataset
+MONGODB_COLLECTION_DT=digital-twin
 
 # Dataset Processing
 DATASET_PATH = dataset/Dataset.xlsx
