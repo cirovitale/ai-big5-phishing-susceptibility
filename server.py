@@ -286,6 +286,7 @@ def execute_testing_pipeline(sel_question):
         
         for i, record in enumerate(records):
             logger.info(f"Elaborazione record {i+1}/{len(records)}")
+            print(f"Elaborazione record {i+1}/{len(records)}")
             if 'personality_traits' in record:
                 traits = record['personality_traits']
                 criticality = record.get('criticality_index', 0)
@@ -424,10 +425,11 @@ def predict():
         result = float(result)
         
         response = {
-            "susceptibility_score": result,
+            "dt_susceptibility_score": result,
+            "dt_response": predicted_behaviour,
             "model_predictions": {k: float(v) if v is not None else None 
-                                for k, v in model_predictions.items()},
-            "dt_response": predicted_behaviour
+                                for k, v in model_predictions.items()}
+            
         }
         
         if 'cf' in data:
@@ -435,7 +437,7 @@ def predict():
             prediction_record = {
                 "cf": data['cf'],
                 "traits": traits,
-                "prediction": result,
+                "dt_susceptibility_score": result,
                 "model_predictions": response["model_predictions"],
                 "dt_response": predicted_behaviour,
                 "timestamp": datetime.datetime.now()
@@ -799,7 +801,7 @@ def predict_by_digital_twin():
         result = float(result)
         
         response = {
-            "susceptibility_score": result,
+            "dt_susceptibility_score": result,
             "model_predictions": {k: float(v) if v is not None else None 
                                 for k, v in model_predictions.items()},
             "dt_response": predicted_behaviour,
@@ -816,7 +818,7 @@ def predict_by_digital_twin():
         prediction_record = {
             "cf": cf,
             "digital_twin_id": str(digital_twin['_id']),
-            "prediction": result,
+            "dt_susceptibility_score": result,
             "model_predictions": response["model_predictions"],
             "dt_response": predicted_behaviour,
             "timestamp": datetime.datetime.now()
