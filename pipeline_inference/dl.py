@@ -13,6 +13,7 @@ from pipeline_inference.pipeline_inference_base import InferencePipelineBase
 from keras.models import Sequential, load_model as keras_load_model
 from keras.layers import Dense
 from keras.optimizers import Adam
+from keras.callbacks import EarlyStopping
 import shap
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ class DLProcessor(InferencePipelineBase):
         self.model = Sequential([
             Dense(32, activation='relu', input_shape=(5,)),
             Dense(16, activation='relu'),
-            Dense(1, activation='sigmoid')  
+            Dense(1, activation='linear')  
         ])
         logger.info("Inizializzato nuovo processor DL")
     
@@ -218,9 +219,14 @@ class DLProcessor(InferencePipelineBase):
             # Addestramento
             X_scaled = self.scaler.fit_transform(self.data)
             y = np.clip(np.array(criticality_vector), 0, 1)
-
+            early_stopping = EarlyStopping(
+                monitor='val_loss',
+                patience=5,
+                restore_best_weights=True,
+                verbose=1
+            )
             self.model.compile(optimizer=Adam(learning_rate=0.001), loss='mean_squared_error')
-            self.model.fit(X_scaled, y, epochs=50, batch_size=8, verbose=0)
+            self.model.fit(X_scaled, y, epochs=50, batch_size=4, verbose=0,validation_split=0.2, callbacks=[early_stopping])
             
             self.save_model()
             logger.info(f"Modello DL addestrato su {len(records)} record")
