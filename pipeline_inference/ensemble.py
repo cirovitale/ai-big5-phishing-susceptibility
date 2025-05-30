@@ -7,6 +7,7 @@ Questo modulo implementa un modello di ensemble che combina i risultati di diver
 
 import logging
 from pipeline_inference.pipeline_inference_base import InferencePipelineBase
+from config import ENSEMBLE_WEIGHT_KNN, ENSEMBLE_WEIGHT_REGRESSION, ENSEMBLE_WEIGHT_LLM, ENSEMBLE_WEIGHT_DL
 
 logger = logging.getLogger(__name__)
 
@@ -24,18 +25,18 @@ class EnsembleProcessor(InferencePipelineBase):
         
         Args:
             weights (dict, optional): Dizionario con i pesi {predittore: peso}.
-                                    Se None, verranno utilizzati pesi predefiniti.
+                                    Se None, verranno utilizzati pesi dalla configurazione.
             name (str): Nome del processor.
         """
         super().__init__(name=name)
         
-        # Pesi predefiniti se non specificati
+        # Usa i pesi dalla configurazione se non specificati
         if weights is None:
             self.weights = {
-                'KNN': 1,               # w0
-                'Regression': 1,        # w1
-                'LLM': 1,               # w2
-                'DL': 1,                # w3
+                'KNN': ENSEMBLE_WEIGHT_KNN,
+                'Regression': ENSEMBLE_WEIGHT_REGRESSION,
+                'LLM': ENSEMBLE_WEIGHT_LLM,
+                'DL': ENSEMBLE_WEIGHT_DL
             }
         else:
             self.weights = weights
@@ -64,7 +65,7 @@ class EnsembleProcessor(InferencePipelineBase):
             llm_value = float(predictions.get('LLM', 0))
             dl_value = float(predictions.get('DL', 0))
             
-            final_value_indicators = 4
+            # Calcolo pesato
             final_value = (
                 self.weights['KNN'] * knn_value +
                 self.weights['Regression'] * regression_value +
@@ -72,9 +73,9 @@ class EnsembleProcessor(InferencePipelineBase):
                 self.weights['DL'] * dl_value
             )
             
-            final_value = round(final_value, 2) / final_value_indicators
+            final_value = round(final_value, 4)
             
-            logger.debug(f"Calcolato valore finale: {final_value} per predizioni: {predictions}")
+            logger.debug(f"Calcolato valore finale: {final_value} per predizioni: {predictions} con pesi: {self.weights}")
             return final_value
             
         except (ValueError, TypeError) as e:

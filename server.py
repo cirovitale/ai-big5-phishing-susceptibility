@@ -7,7 +7,7 @@ import json
 import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from config import validate_configuration, LOG_LEVEL, MONGODB_COLLECTION_DT
+from config import validate_configuration, LOG_LEVEL, MONGODB_COLLECTION_DT, ENSEMBLE_WEIGHT_KNN, ENSEMBLE_WEIGHT_REGRESSION, ENSEMBLE_WEIGHT_LLM, ENSEMBLE_WEIGHT_DL
 from pipeline_inference.dl import DLProcessor
 from pipeline_inference.llm import LLMProcessor
 from services.mongodb_service import MongoDBService
@@ -111,28 +111,30 @@ def execute_training_pipeline():
         logger.info(f"Recuperati {len(data)} record del dataset da MongoDB per l'addestramento")
         
         # Addestramento KNN
-        try:
-            logger.info("Avvio addestramento modello KNN")
-            knn_processor = KNNProcessor(auto_load=False)  # Non caricare modello esistente
-            knn_processor.fit(data)
-            training_results['models_trained'].append('KNN')
-            logger.info("Addestramento KNN completato con successo")
-        except Exception as e:
-            error_msg = f"Errore durante l'addestramento KNN: {e}"
-            logger.error(error_msg, exc_info=True)
-            training_results['errors'].append(error_msg)
+        if ENSEMBLE_WEIGHT_KNN > 0:
+            try:
+                logger.info("Avvio addestramento modello KNN")
+                knn_processor = KNNProcessor(auto_load=False)  # Non caricare modello esistente
+                knn_processor.fit(data)
+                training_results['models_trained'].append('KNN')
+                logger.info("Addestramento KNN completato con successo")
+            except Exception as e:
+                error_msg = f"Errore durante l'addestramento KNN: {e}"
+                logger.error(error_msg, exc_info=True)
+                training_results['errors'].append(error_msg)
         
         # Addestramento DL
-        try:
-            logger.info("Avvio addestramento modello DL")
-            dl_processor = DLProcessor(auto_load=False)  # Non caricare modello esistente
-            dl_processor.fit(data)
-            training_results['models_trained'].append('DL')
-            logger.info("Addestramento DL completato con successo")
-        except Exception as e:
-            error_msg = f"Errore durante l'addestramento DL: {e}"
-            logger.error(error_msg, exc_info=True)
-            training_results['errors'].append(error_msg)
+        if ENSEMBLE_WEIGHT_DL > 0:
+            try:
+                logger.info("Avvio addestramento modello DL")
+                dl_processor = DLProcessor(auto_load=False)  # Non caricare modello esistente
+                dl_processor.fit(data)
+                training_results['models_trained'].append('DL')
+                logger.info("Addestramento DL completato con successo")
+            except Exception as e:
+                error_msg = f"Errore durante l'addestramento DL: {e}"
+                logger.error(error_msg, exc_info=True)
+                training_results['errors'].append(error_msg)
         
         # Status Finale
         if training_results['errors']:
@@ -176,66 +178,71 @@ def execute_inference_pipeline(query_traits, sel_question):
 
     predictions = {}
     question = sel_question
+    predicted_behaviour = None
     
     # KNN
-    try:
-        knn_processor = KNNProcessor(auto_load=True)
-        
-        # Verifica se il modello è addestrato
-        if not knn_processor.is_trained():
-            logger.warning("Modello KNN non addestrato, avvio addestramento automatico")
-            data = mongodb_service.get_all_dataset_records()
-            if not data:
-                raise RuntimeError("Nessun dato del dataset disponibile per l'addestramento automatico del modello KNN")
-            knn_processor.fit(data)
-        
-        knn_result = knn_processor.process(query_traits)
-        logger.info(f"KNN result: {knn_result}")
-        predictions['KNN'] = knn_result
-    except Exception as e:
-        logger.error(f"Errore durante l'inferenza KNN: {e}", exc_info=True)
-        predictions['KNN'] = None
+    if ENSEMBLE_WEIGHT_KNN > 0:
+        try:
+            knn_processor = KNNProcessor(auto_load=True)
+            
+            # Verifica se il modello è addestrato
+            if not knn_processor.is_trained():
+                logger.warning("Modello KNN non addestrato, avvio addestramento automatico")
+                data = mongodb_service.get_all_dataset_records()
+                if not data:
+                    raise RuntimeError("Nessun dato del dataset disponibile per l'addestramento automatico del modello KNN")
+                knn_processor.fit(data)
+            
+            knn_result = knn_processor.process(query_traits)
+            logger.info(f"KNN result: {knn_result}")
+            predictions['KNN'] = knn_result
+        except Exception as e:
+            logger.error(f"Errore durante l'inferenza KNN: {e}", exc_info=True)
+            predictions['KNN'] = None
     
     # Regressione
-    try:
-        regression_processor = RegressionProcessor()
-        regression_result = regression_processor.process(query_traits)
-        
-        predictions['Regression'] = regression_result
-        logger.info(f"REGRESSION RESULT: {regression_result}")
-    except Exception as e:
-        logger.error(f"Errore durante il calcolo della regressione: {e}", exc_info=True)
-        predictions['Regression'] = None
+    if ENSEMBLE_WEIGHT_REGRESSION > 0:
+        try:
+            regression_processor = RegressionProcessor()
+            regression_result = regression_processor.process(query_traits)
+            
+            predictions['Regression'] = regression_result
+            logger.info(f"REGRESSION RESULT: {regression_result}")
+        except Exception as e:
+            logger.error(f"Errore durante il calcolo della regressione: {e}", exc_info=True)
+            predictions['Regression'] = None
     
     # LLM
-    try:
-        llm_processor = LLMProcessor(question=question)
-        llm_processor_result, predicted_behaviour = llm_processor.process(query_traits)
-        
-        predictions['LLM'] = llm_processor_result
-        logger.info(f"LLM RESULT: {llm_processor_result}")
-    except Exception as e:
-        logger.error(f"Errore durante l'inferenza LLM: {e}", exc_info=True)
-        predictions['LLM'] = None
+    if ENSEMBLE_WEIGHT_LLM > 0:
+        try:
+            llm_processor = LLMProcessor(question=question)
+            llm_processor_result, predicted_behaviour = llm_processor.process(query_traits)
+            
+            predictions['LLM'] = llm_processor_result
+            logger.info(f"LLM RESULT: {llm_processor_result}")
+        except Exception as e:
+            logger.error(f"Errore durante l'inferenza LLM: {e}", exc_info=True)
+            predictions['LLM'] = None
     
     # DL
-    try:
-        dl_processor = DLProcessor(auto_load=True)
-        
-        # Verifica se il modello è addestrato
-        if not dl_processor.is_trained():
-            logger.warning("Modello DL non addestrato, avvio addestramento automatico")
-            data = mongodb_service.get_all_dataset_records()
-            if not data:
-                raise RuntimeError("Nessun dato del dataset disponibile per l'addestramento automatico del modello DL")
-            dl_processor.fit(data)
-        
-        dl_result = dl_processor.process(query_traits)
-        logger.info(f"DL result: {dl_result}")
-        predictions['DL'] = dl_result
-    except Exception as e:
-        logger.error(f"Errore durante l'inferenza DL: {e}", exc_info=True)
-        predictions['DL'] = None
+    if ENSEMBLE_WEIGHT_DL > 0:
+        try:
+            dl_processor = DLProcessor(auto_load=True)
+            
+            # Verifica se il modello è addestrato
+            if not dl_processor.is_trained():
+                logger.warning("Modello DL non addestrato, avvio addestramento automatico")
+                data = mongodb_service.get_all_dataset_records()
+                if not data:
+                    raise RuntimeError("Nessun dato del dataset disponibile per l'addestramento automatico del modello DL")
+                dl_processor.fit(data)
+            
+            dl_result = dl_processor.process(query_traits)
+            logger.info(f"DL result: {dl_result}")
+            predictions['DL'] = dl_result
+        except Exception as e:
+            logger.error(f"Errore durante l'inferenza DL: {e}", exc_info=True)
+            predictions['DL'] = None
     
     # ENSEMBLE
     try:
@@ -277,7 +284,8 @@ def execute_testing_pipeline(sel_question):
         true_values = []
         predictions = []
         
-        for record in records:
+        for i, record in enumerate(records):
+            logger.info(f"Elaborazione record {i+1}/{len(records)}")
             if 'personality_traits' in record:
                 traits = record['personality_traits']
                 criticality = record.get('criticality_index', 0)

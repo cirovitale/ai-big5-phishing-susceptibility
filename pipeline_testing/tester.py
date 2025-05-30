@@ -52,17 +52,6 @@ class Tester():
             'confusion_matrix': confusion_matrix(y_true_binary, y_pred_binary).tolist(),
         }
         
-        # Calcola ROC AUC se possibile
-        try:
-            metrics['roc_auc'] = roc_auc_score(y_true_binary, predictions)
-            fpr, tpr, _ = roc_curve(y_true_binary, predictions)
-            metrics['roc_curve'] = {
-                'fpr': fpr.tolist(),
-                'tpr': tpr.tolist()
-            }
-        except Exception as e:
-            logger.warning(f"Impossibile calcolare ROC AUC: {e}")
-        
         logger.info(f"Valutazione completata. Accuracy: {metrics['accuracy']:.4f}, F1: {metrics['f1_score']:.4f}")
         return metrics
     

@@ -16,9 +16,9 @@ def predict():
             "conscientiousness": 0.9,
             "neuroticism": 0.2,
             "openness": 0.2
-            },
+        },
         "cf": "test_user_1",
-        "question_for_prompt": "Come ti poni rispetto ad una nuova mail nella tua casella di posta, o un nuovo messaggio sul tuo servizio di messaggistica preferito?"
+        "question_for_prompt": "Come ti comporteresti in caso di messaggio su whatsapp su un gruppo non ufficiale? Ti vengono chiesti dei documenti riservati."
     }
     
     response = requests.post(
@@ -41,7 +41,7 @@ def extract():
 
 def testing():
     input_data = {
-        "question_for_prompt": "Come ti poni rispetto ad una nuova mail nella tua casella di posta, o un nuovo messaggio sul tuo servizio di messaggistica preferito?"
+        "question_for_prompt": "Come ti comporteresti in caso di messaggio su whatsapp su un gruppo non ufficiale? Ti vengono chiesti dei documenti riservati."
     }
     response = requests.post(f"{BASE_URL}/testing", json=input_data)
     print(json.dumps(response.json(), indent=2))
@@ -75,7 +75,7 @@ def register_digital_twin():
 def predict_by_digital_twin():
     input_data = {
         "cf": "RSSMRA80L05F593A",
-        "question_for_prompt": "Come ti poni rispetto ad una nuova mail nella tua casella di posta, o un nuovo messaggio sul tuo servizio di messaggistica preferito?"
+        "question_for_prompt": "Come ti comporteresti in caso di messaggio su whatsapp su un gruppo non ufficiale? Ti vengono chiesti dei documenti riservati."
     }
 
     response = requests.post(
@@ -99,11 +99,11 @@ def run_all_tests():
     # print("\n2. Training")
     # training()
     
-    #print("\n3. Predict")
-    #predict()
+    print("\n3. Predict")
+    predict()
 
-    print("\n4. Testing")
-    testing()
+    # print("\n4. Testing")
+    # testing()
 
     #print("\n5. Register Digital Twin")
     #register_digital_twin()

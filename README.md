@@ -63,6 +63,12 @@ SCALING_TYPE = "min_max" # o "standard"
 
 # Logging
 LOG_LEVEL=INFO
+
+# Ensemble Weights Configuration
+ENSEMBLE_WEIGHT_KNN=1
+ENSEMBLE_WEIGHT_REGRESSION=1
+ENSEMBLE_WEIGHT_LLM=1
+ENSEMBLE_WEIGHT_DL=1
 ```
 
 ### 3. Build and launch with Docker Compose
@@ -178,6 +184,12 @@ SCALING_TYPE = "min_max" # o "standard"
 
 # Logging
 LOG_LEVEL=INFO
+
+# Ensemble Weights Configuration
+ENSEMBLE_WEIGHT_KNN=1
+ENSEMBLE_WEIGHT_REGRESSION=1
+ENSEMBLE_WEIGHT_LLM=1
+ENSEMBLE_WEIGHT_DL=1
 ```
 
 ### 3. Builda e avvia con Docker Compose
