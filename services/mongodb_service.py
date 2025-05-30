@@ -341,3 +341,95 @@ class MongoDBService:
         except Exception as e:
             logger.error(f"Errore durante l'aggiornamento dell'ultimo training per CF {cf}: {e}")
             raise
+
+    def get_training_dataset_records(self):
+        """
+        Recupera solo i record del training set dal dataset (validation=False).
+        
+        Returns:
+            list: Lista dei record del training set nella collezione.
+            
+        Raises:
+            RuntimeError: Se la collezione dataset non è stata selezionata.
+            Exception: Se si verificano errori durante il recupero dei dati da MongoDB.
+        """
+        try:
+            if self.dataset_collection is None:
+                logger.error("Collezione dataset non selezionata")
+                raise RuntimeError("Collezione dataset non selezionata. Chiamare select_database_and_collections() prima.")
+            
+            # Recupera solo i record con validation=False (training set)
+            records = list(self.dataset_collection.find({"validation": False}))
+
+            for record in records:
+                record.pop('raw_data', None)
+
+            logger.info(f"Recuperati {len(records)} record del training set da MongoDB")
+            return records
+        
+        except Exception as e:
+            logger.error(f"Errore durante il recupero dei record del training set da MongoDB: {e}")
+            raise
+
+    def get_testing_dataset_records(self):
+        """
+        Recupera solo i record del test set dal dataset (validation=True).
+        
+        Returns:
+            list: Lista dei record del test set nella collezione.
+            
+        Raises:
+            RuntimeError: Se la collezione dataset non è stata selezionata.
+            Exception: Se si verificano errori durante il recupero dei dati da MongoDB.
+        """
+        try:
+            if self.dataset_collection is None:
+                logger.error("Collezione dataset non selezionata")
+                raise RuntimeError("Collezione dataset non selezionata. Chiamare select_database_and_collections() prima.")
+            
+            # Recupera solo i record con validation=True (test set)
+            records = list(self.dataset_collection.find({"validation": True}))
+
+            for record in records:
+                record.pop('raw_data', None)
+
+            logger.info(f"Recuperati {len(records)} record del test set da MongoDB")
+            return records
+        
+        except Exception as e:
+            logger.error(f"Errore durante il recupero dei record del test set da MongoDB: {e}")
+            raise
+
+    def get_train_test_split_info(self):
+        """
+        Restituisce informazioni sulla divisione train/test del dataset.
+        
+        Returns:
+            dict: Dizionario contenente conteggi e percentuali del train/test split
+            
+        Raises:
+            RuntimeError: Se la collezione dataset non è stata selezionata
+        """
+        try:
+            if self.dataset_collection is None:
+                logger.error("Collezione dataset non selezionata")
+                raise RuntimeError("Collezione dataset non selezionata. Chiamare select_database_and_collections() prima.")
+            
+            total_count = self.dataset_collection.count_documents({})
+            train_count = self.dataset_collection.count_documents({"validation": False})
+            test_count = self.dataset_collection.count_documents({"validation": True})
+            
+            split_info = {
+                "total_records": total_count,
+                "training_records": train_count,
+                "testing_records": test_count,
+                "training_percentage": (train_count / total_count * 100) if total_count > 0 else 0,
+                "testing_percentage": (test_count / total_count * 100) if total_count > 0 else 0
+            }
+            
+            logger.debug(f"Train/Test split info: {split_info}")
+            return split_info
+        
+        except Exception as e:
+            logger.error(f"Errore durante il recupero delle informazioni train/test split: {e}")
+            return {}

@@ -52,7 +52,12 @@ class Tester():
             'confusion_matrix': confusion_matrix(y_true_binary, y_pred_binary).tolist(),
         }
         
-        logger.info(f"Valutazione completata. Accuracy: {metrics['accuracy']:.4f}, F1: {metrics['f1_score']:.4f}")
+        # Log dettagliato di tutte le metriche
+        logger.info(f"Valutazione completata. Accuracy: {metrics['accuracy']:.4f}, "
+                   f"Precision: {metrics['precision']:.4f}, "
+                   f"Recall: {metrics['recall']:.4f}, "
+                   f"F1-Score: {metrics['f1_score']:.4f}")
+        
         return metrics
     
 

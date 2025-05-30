@@ -9,6 +9,7 @@ per l'inserimento in MongoDB.
 import logging
 import os
 import pandas as pd
+import numpy as np  # Aggiunto per il random splitting
 from datetime import datetime
 from pipeline_preprocessing.data_processor_base import DataProcessorBase
 from config import DATASET_PATH, SCALING_TYPE
@@ -20,13 +21,19 @@ class ExcelDataProcessor(DataProcessorBase):
     Classe per l'elaborazione dei dati provenienti da file Excel.
     """
     
-    def __init__(self):
+    def __init__(self, test_size=0.2, random_state=42):
         """
         Inizializza il data processor di dati Excel.
+        
+        Args:
+            test_size (float): Percentuale di dati da riservare per il testing (default: 0.2 = 20%)
+            random_state (int): Seed per la riproducibilità della divisione train/test
         """
         super().__init__()
         self.source_data = DATASET_PATH
         self.scaling_type = SCALING_TYPE
+        self.test_size = test_size
+        self.random_state = random_state
 
         # Statistiche del dataset
         self.dataset_stats = {
@@ -210,7 +217,7 @@ class ExcelDataProcessor(DataProcessorBase):
 
     def build_records(self, df):
         """
-        Costruisce i record elaborati a partire dal DataFrame.
+        Costruisce i record elaborati a partire dal DataFrame con divisione train/test.
 
         Args:
             df (pandas.DataFrame): DataFrame contenente i dati letti dal file Excel.
@@ -219,14 +226,29 @@ class ExcelDataProcessor(DataProcessorBase):
             list: Lista di record elaborati pronti per l'inserimento in MongoDB.
         """
         processed_data = []
-        df = df[df['Group'] != 'Arab']
+        # df = df[df['Group'] != 'Arab']
+        
+        # Divisione stratificata train/test basata sui dati
+        np.random.seed(self.random_state)
+        total_records = len(df)
+        test_indices = np.random.choice(
+            total_records, 
+            size=int(total_records * self.test_size), 
+            replace=False
+        )
+        
+        logger.info(f"Divisione dataset: {total_records} record totali, {len(test_indices)} per testing ({self.test_size*100:.1f}%), {total_records - len(test_indices)} per training ({(1-self.test_size)*100:.1f}%)")
 
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
             try:
+                # Determina se questo record è per il testing
+                is_test_record = idx in test_indices
+                
                 record = {
                     'source': 'excel_dataset',
+                    'validation': is_test_record,
                     'demographic_traits': {
-                        # [RIMOSSO] 'country': row.get('Group', ''),
+                        'country': row.get('Group', ''),
                         'age': int(row.get('Age', 0)) if pd.notna(row.get('Age', 0)) else 0,
                         'gender': row.get('Gender', ''),
                     },
@@ -244,10 +266,14 @@ class ExcelDataProcessor(DataProcessorBase):
                 }
                 processed_data.append(record)
             except Exception as e:
-                logger.error(f"Errore nell'elaborazione della riga {_}: {e}")
+                logger.error(f"Errore nell'elaborazione della riga {idx}: {e}")
                 continue
 
-        logger.info(f"Elaborati {len(processed_data)} record dal file Excel")
+        # Log della divisione finale
+        train_count = sum(1 for record in processed_data if not record['validation'])
+        test_count = sum(1 for record in processed_data if record['validation'])
+        logger.info(f"Record elaborati: {train_count} training, {test_count} testing, {len(processed_data)} totali")
+        
         return processed_data
 
     def process_data(self):

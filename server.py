@@ -79,9 +79,9 @@ def execute_extraction_preprocessing_pipeline(process_form=False, process_excel=
 
 def execute_training_pipeline():
     """
-    Esegue la pipeline di addestramento per i modelli KNN e DL.
+    Esegue la pipeline di addestramento per i modelli KNN e DL utilizzando solo il training set.
     
-    Questa funzione addestra i modelli utilizzando tutti i dati del dataset di personalità
+    Questa funzione addestra i modelli utilizzando solo i dati del training set (validation=False)
     disponibili in MongoDB e salva i modelli addestrati nella directory /models per uso futuro.
     
     Returns:
@@ -95,20 +95,26 @@ def execute_training_pipeline():
     training_results = {
         'status': 'success',
         'models_trained': [],
-        'errors': []
+        'errors': [],
+        'dataset_info': {}
     }
     
     try:
-        # Recupera tutti i dati del dataset da MongoDB
-        data = mongodb_service.get_all_dataset_records()
+        # Recupera i dati del training set da MongoDB
+        data = mongodb_service.get_training_dataset_records()
         if not data:
-            error_msg = "Nessun dato del dataset disponibile in MongoDB per l'addestramento"
+            error_msg = "Nessun dato del training set disponibile in MongoDB per l'addestramento"
             logger.error(error_msg)
             training_results['status'] = 'error'
             training_results['errors'].append(error_msg)
             return training_results
         
-        logger.info(f"Recuperati {len(data)} record del dataset da MongoDB per l'addestramento")
+        # Ottieni informazioni sulla divisione train/test
+        split_info = mongodb_service.get_train_test_split_info()
+        training_results['dataset_info'] = split_info
+        
+        logger.info(f"Recuperati {len(data)} record del training set da MongoDB per l'addestramento")
+        logger.info(f"Training set: {split_info.get('training_records', 0)} record ({split_info.get('training_percentage', 0):.1f}%)")
         
         # Addestramento KNN
         if ENSEMBLE_WEIGHT_KNN > 0:
@@ -188,7 +194,7 @@ def execute_inference_pipeline(query_traits, sel_question):
             # Verifica se il modello è addestrato
             if not knn_processor.is_trained():
                 logger.warning("Modello KNN non addestrato, avvio addestramento automatico")
-                data = mongodb_service.get_all_dataset_records()
+                data = mongodb_service.get_training_dataset_records()
                 if not data:
                     raise RuntimeError("Nessun dato del dataset disponibile per l'addestramento automatico del modello KNN")
                 knn_processor.fit(data)
@@ -232,7 +238,7 @@ def execute_inference_pipeline(query_traits, sel_question):
             # Verifica se il modello è addestrato
             if not dl_processor.is_trained():
                 logger.warning("Modello DL non addestrato, avvio addestramento automatico")
-                data = mongodb_service.get_all_dataset_records()
+                data = mongodb_service.get_training_dataset_records()
                 if not data:
                     raise RuntimeError("Nessun dato del dataset disponibile per l'addestramento automatico del modello DL")
                 dl_processor.fit(data)
@@ -257,7 +263,7 @@ def execute_inference_pipeline(query_traits, sel_question):
 
 def execute_testing_pipeline(sel_question):
     """
-    Esegue la pipeline di testing utilizzando tutti i record del dataset in MongoDB.
+    Esegue la pipeline di testing utilizzando solo i record del test set in MongoDB.
     
     Args:
         sel_question: Domanda da utilizzare per il LLM 
@@ -271,12 +277,17 @@ def execute_testing_pipeline(sel_question):
     logger.info("Avvio pipeline di testing")
     
     try:
-        records = mongodb_service.get_all_dataset_records()
+        # Recupera solo i record del test set
+        records = mongodb_service.get_testing_dataset_records()
         if not records:
-            logger.error("Nessun record del dataset trovato in MongoDB per il testing")
+            logger.error("Nessun record del test set trovato in MongoDB per il testing")
             return None
         
-        logger.info(f"Recuperati {len(records)} record del dataset da MongoDB per il testing")
+        # Ottieni informazioni sulla divisione train/test
+        split_info = mongodb_service.get_train_test_split_info()
+        
+        logger.info(f"Recuperati {len(records)} record del test set da MongoDB per il testing")
+        logger.info(f"Test set: {split_info.get('testing_records', 0)} record ({split_info.get('testing_percentage', 0):.1f}%)")
         
         question = sel_question
         logger.info(f"Query utilizzata per il testing: {question}")
@@ -285,8 +296,8 @@ def execute_testing_pipeline(sel_question):
         predictions = []
         
         for i, record in enumerate(records):
-            logger.info(f"Elaborazione record {i+1}/{len(records)}")
-            print(f"Elaborazione record {i+1}/{len(records)}")
+            logger.info(f"Elaborazione record test {i+1}/{len(records)}")
+            print(f"Elaborazione record test {i+1}/{len(records)}")
             if 'personality_traits' in record:
                 traits = record['personality_traits']
                 criticality = record.get('criticality_index', 0)
@@ -305,7 +316,16 @@ def execute_testing_pipeline(sel_question):
         
         metrics = tester.process(test_data)
         
-        logger.info(f"Testing completato. Accuracy: {metrics['accuracy']:.4f}, F1: {metrics['f1_score']:.4f}")
+        # Aggiungi informazioni sul dataset alle metriche
+        metrics['dataset_info'] = split_info
+        metrics['test_records_used'] = len(records)
+        
+        logger.info(f"Testing completato su {len(records)} record del test set.")
+        logger.info(f"Metriche finali - Accuracy: {metrics['accuracy']:.4f}, "
+                   f"Precision: {metrics['precision']:.4f}, "
+                   f"Recall: {metrics['recall']:.4f}, "
+                   f"F1-Score: {metrics['f1_score']:.4f}")
+        
         return metrics
         
     except Exception as e:
