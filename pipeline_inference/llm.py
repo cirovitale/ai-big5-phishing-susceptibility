@@ -263,25 +263,25 @@ class LLMProcessor(InferencePipelineBase):
 
         main_prompt = (
             "Sei un esperto nell'assegnazione di indici di criticità ai comportamenti degli utenti, valutati attraverso l'analisi dei loro tratti psicologici riassunti con il modello OCEAN, insieme ad una breve descrizione di come esso si comporterebbe di fronte ad uno scenario di phishing. Nello specifico, ti fornirò: 'Esempi di assegnazione indice di criticità', ovvero 4 Esempi di come andrebbe valutato l'indice di criticità sulla base di comportamento e tratti dell'utente (attenzione, questi sono risultati basati su domande GENERICHE di phishing; assicurati, nel tuo caso, di concentrarti nell'ambito del comportamento dell'utente); 'Descrizione dei nostri studi', in cui ti sintetizzo i risultati degli studi utili per valutare meglio la suscettibilità dell'utente sulla base dei suoi tratti; 'Tratti dell'utente in esame', in cui sono presenti i 5 tratti OCEAN dell'utente in esame; 'Comportamento dell'utente in esame', in cui è presente una descrizione del comportamento dell'utente di fronte a scenari di phishing generici. Analizza questo materiale ed assegna un valore all'indice di criticità all'utente preso in esame. "
-            # "Esempi di assegnazione indice di criticità:\n\n"
-            # # esempi con gpt (o4-mini)
-            # "Esempio 1:\n"
-            # "  Tratti OCEAN dell'utente -> Extraversion: 0.5, Agreeableness: 0.4, Conscientiousness: 0.3, Neuroticism: 0.5, Openness: 0.4"
-            # "  Descrizione del comportamento dell'utente -> 'Appena vedo un messaggio nuovo, l'apro subito per ansia e voglia di stimoli. Non controllo bene il mittente per poca attenzione e scarsa cautela: clicco il link. Solo dopo, preso da insicurezza, chiedo a un amico se è legittimo.'\n"
-            # "  Criticità: 0.70\n\n"
-            # "Esempio 2:\n"
-            # "  Tratti OCEAN dell'utente -> Extraversion: 0.1, Agreeableness: 0.8, Conscientiousness: 0.2, Neuroticism: 0.7, Openness: 0.3"
-            # "  Descrizione del comportamento dell'utente -> 'Appena leggo un'email urgente mi prende l'ansia: apro subito senza verificare il mittente, il tono amichevole mi spinge a fidarmi. Clicco il link per risolvere in fretta, senza esaminare URL o errori grossolani. Solo dopo, preso dall'incertezza, inoltro il messaggio a un collega sperando che confermi sia legittimo.'\n"
-            # "  Criticità: 0.85\n\n"
-            # # esempi con llama
-            # "Esempio 3:\n"
-            # "  Tratti OCEAN dell'utente -> Extraversion: 0.7, Agreeableness: 0.2, Conscientiousness: 0.6, Neuroticism: 0.35, Openness: 0.6"
-            # "  Descrizione del comportamento dell'utente -> 'Quando ricevo un messaggio nuovo, lo apro subito perché sono curiosa e socievole. Prima di cliccare eventuali link, però, controllo il mittente e verifico che non ci siano errori o discrepanze. Se qualcosa mi sembra sospetto, chiudo immediatamente e segnalo la cosa; in caso contrario, procedo con cautela. La mia curiosità viene bilanciata dalla prudenza e dall'attenzione.'\n"
-            # "  Criticità: 0.25\n\n"
-            # "Esempio 4:\n"
-            # "  Tratti OCEAN dell'utente -> Extraversion: 0.7, Agreeableness: 0.3, Conscientiousness: 0.4, Neuroticism: 0.2, Openness: 0.9"
-            # "  Descrizione del comportamento dell'utente -> 'Quando ricevo un nuovo messaggio, lo apro subito per socievolezza e curiosità. Controllo poi il mittente e cerco segnali d'allarme. La mia apertura mentale mi fa considerare varie possibilità e talvolta la curiosità prevale sulla cautela, ma cerco di bilanciare le due cose prima di procedere con link o allegati.'\n"
-            # "  Criticità: 0.40\n\n"
+            "Esempi di assegnazione indice di criticità:\n\n"
+            # esempi con gpt (o4-mini)
+            "Esempio 1:\n"
+            "  Tratti OCEAN dell'utente -> Extraversion: 0.5, Agreeableness: 0.4, Conscientiousness: 0.3, Neuroticism: 0.5, Openness: 0.4"
+            "  Descrizione del comportamento dell'utente -> 'Appena vedo un messaggio nuovo, l'apro subito per ansia e voglia di stimoli. Non controllo bene il mittente per poca attenzione e scarsa cautela: clicco il link. Solo dopo, preso da insicurezza, chiedo a un amico se è legittimo.'\n"
+            "  Criticità: 0.70\n\n"
+            "Esempio 2:\n"
+            "  Tratti OCEAN dell'utente -> Extraversion: 0.1, Agreeableness: 0.8, Conscientiousness: 0.2, Neuroticism: 0.7, Openness: 0.3"
+            "  Descrizione del comportamento dell'utente -> 'Appena leggo un'email urgente mi prende l'ansia: apro subito senza verificare il mittente, il tono amichevole mi spinge a fidarmi. Clicco il link per risolvere in fretta, senza esaminare URL o errori grossolani. Solo dopo, preso dall'incertezza, inoltro il messaggio a un collega sperando che confermi sia legittimo.'\n"
+            "  Criticità: 0.85\n\n"
+            # esempi con llama
+            "Esempio 3:\n"
+            "  Tratti OCEAN dell'utente -> Extraversion: 0.7, Agreeableness: 0.2, Conscientiousness: 0.6, Neuroticism: 0.35, Openness: 0.6"
+            "  Descrizione del comportamento dell'utente -> 'Quando ricevo un messaggio nuovo, lo apro subito perché sono curiosa e socievole. Prima di cliccare eventuali link, però, controllo il mittente e verifico che non ci siano errori o discrepanze. Se qualcosa mi sembra sospetto, chiudo immediatamente e segnalo la cosa; in caso contrario, procedo con cautela. La mia curiosità viene bilanciata dalla prudenza e dall'attenzione.'\n"
+            "  Criticità: 0.25\n\n"
+            "Esempio 4:\n"
+            "  Tratti OCEAN dell'utente -> Extraversion: 0.7, Agreeableness: 0.3, Conscientiousness: 0.4, Neuroticism: 0.2, Openness: 0.9"
+            "  Descrizione del comportamento dell'utente -> 'Quando ricevo un nuovo messaggio, lo apro subito per socievolezza e curiosità. Controllo poi il mittente e cerco segnali d'allarme. La mia apertura mentale mi fa considerare varie possibilità e talvolta la curiosità prevale sulla cautela, ma cerco di bilanciare le due cose prima di procedere con link o allegati.'\n"
+            "  Criticità: 0.40\n\n"
             "Descrizione dei nostri studi: dai nostri studi, è risultato che un aumento nei valori dei tratti Agreeableness, Neuroticism, Extraversion (in questo ordine) comportano anche una crescita della suscettibilità al phishing dell'utente (di conseguenza, una loro diminuzione comporta una minore suscettibilità). Conscientiousness invece dimostra il comportamento opposto, ovvero che al suo crescere la suscettibilità dell'utente si riduce. Openness ha dimostrato comportamenti neutrali, leggermente tendenti verso il far crescere la suscettibilità dell'utente insieme alla loro crescita, anche se in maniera minore degli altri 3 tratti citati. Ricorda queste informazioni quando andrai ad analizzare la situazione dell'utente e applica tali nozioni sui suoi tratti in modo non banale."
         )
 
