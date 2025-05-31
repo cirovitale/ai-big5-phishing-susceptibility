@@ -65,22 +65,68 @@ class EnsembleProcessor(InferencePipelineBase):
             llm_value = float(predictions.get('LLM', 0))
             dl_value = float(predictions.get('DL', 0))
             
-            # Calcolo pesato
-            final_value = (
-                self.weights['KNN'] * knn_value +
-                self.weights['Regression'] * regression_value +
-                self.weights['LLM'] * llm_value +
-                self.weights['DL'] * dl_value
-            )
+            # Calcola la somma dei pesi attivi (solo per modelli che hanno fornito risultati validi)
+            active_weights_sum = 0
+            weighted_sum = 0
             
+            if knn_value is not None:
+                weighted_sum += self.weights['KNN'] * knn_value
+                active_weights_sum += self.weights['KNN']
+            
+            if regression_value is not None:
+                weighted_sum += self.weights['Regression'] * regression_value
+                active_weights_sum += self.weights['Regression']
+                
+            if llm_value is not None:
+                weighted_sum += self.weights['LLM'] * llm_value
+                active_weights_sum += self.weights['LLM']
+                
+            if dl_value is not None:
+                weighted_sum += self.weights['DL'] * dl_value
+                active_weights_sum += self.weights['DL']
+            
+            # Se nessun modello ha fornito risultati validi, restituisce un valore di fallback
+            if active_weights_sum == 0:
+                logger.warning("Nessun modello ha fornito risultati validi, uso valore di fallback 0.5")
+                return 0.5
+            
+            # Normalizza per la somma dei pesi attivi per mantenere il range 0-1
+            final_value = weighted_sum / active_weights_sum
             final_value = round(final_value, 4)
             
-            logger.debug(f"Calcolato valore finale: {final_value} per predizioni: {predictions} con pesi: {self.weights}")
+            logger.debug(f"Calcolato valore finale: {final_value} per predizioni valide: {predictions} con pesi attivi: {active_weights_sum}")
             return final_value
             
-        except (ValueError, TypeError) as e:
-            logger.error(f"Errore nella conversione dei valori: {e}")
+        except Exception as e:
+            logger.error(f"Errore durante il calcolo dell'ensemble: {e}")
             raise ValueError(f"Errore nel calcolo dell'ensemble: {e}")
+    
+    def _safe_float_conversion(self, value, model_name):
+        """
+        Converte un valore in float gestendo i casi di None e valori non validi.
+        
+        Args:
+            value: Valore da convertire
+            model_name: Nome del modello per il logging
+            
+        Returns:
+            float or None: Valore convertito o None se non valido
+        """
+        if value is None:
+            logger.warning(f"Modello {model_name} ha restituito None, sarà escluso dal calcolo")
+            return None
+        
+        try:
+            float_value = float(value)
+            # Verifica che il valore sia nel range valido
+            if 0 <= float_value <= 1:
+                return float_value
+            else:
+                logger.warning(f"Modello {model_name} ha restituito valore fuori range [0,1]: {float_value}, sarà escluso")
+                return None
+        except (ValueError, TypeError):
+            logger.warning(f"Modello {model_name} ha restituito valore non convertibile in float: {value}, sarà escluso")
+            return None
     
     def process(self, predictions):
         """
