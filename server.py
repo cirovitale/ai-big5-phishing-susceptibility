@@ -269,7 +269,7 @@ def execute_testing_pipeline(sel_question):
         sel_question: Domanda da utilizzare per il LLM 
 
     Returns:
-        dict: Metriche di valutazione del modello (accuracy, precision, recall, f1_score)
+        dict: Metriche di valutazione del modello (classificazione e regressione)
         
     Raises:
         Exception: Se si verificano errori durante il testing
@@ -321,10 +321,19 @@ def execute_testing_pipeline(sel_question):
         metrics['test_records_used'] = len(records)
         
         logger.info(f"Testing completato su {len(records)} record del test set.")
-        logger.info(f"Metriche finali - Accuracy: {metrics['accuracy']:.4f}, "
-                   f"Precision: {metrics['precision']:.4f}, "
-                   f"Recall: {metrics['recall']:.4f}, "
-                   f"F1-Score: {metrics['f1_score']:.4f}")
+        
+        # Accesso corretto alle metriche con la nuova struttura
+        classification_metrics = metrics['classification']
+        regression_metrics = metrics['regression']
+        
+        logger.info(f"Metriche di Classificazione - Accuracy: {classification_metrics['accuracy']:.4f}, "
+                   f"Precision: {classification_metrics['precision']:.4f}, "
+                   f"Recall: {classification_metrics['recall']:.4f}, "
+                   f"F1-Score: {classification_metrics['f1_score']:.4f}")
+        logger.info(f"Metriche di Regressione - MAE: {regression_metrics['mae']:.4f}, "
+                   f"MSE: {regression_metrics['mse']:.4f}, "
+                   f"RMSE: {regression_metrics['rmse']:.4f}, "
+                   f"R²: {regression_metrics['r2_score']:.4f}")
         
         return metrics
         
@@ -444,12 +453,14 @@ def predict():
         
         result = float(result)
         
+        prediction_class = classify_prediction(result)
+        
         response = {
             "dt_susceptibility_score": result,
             "dt_response": predicted_behaviour,
             "model_predictions": {k: float(v) if v is not None else None 
-                                for k, v in model_predictions.items()}
-            
+                                for k, v in model_predictions.items()},
+            "classification": prediction_class
         }
         
         if 'cf' in data:
@@ -527,10 +538,8 @@ def testing():
 
     Returns:
         JSON: Risposta contenente le metriche di valutazione del modello:
-            - accuracy: Accuratezza del modello
-            - precision: Precisione del modello
-            - recall: Recall del modello
-            - f1_score: F1 score del modello
+            - classification: Metriche di classificazione (accuracy, precision, recall, f1_score)
+            - regression: Metriche di regressione (mae, mse, rmse, r2_score, mape)
             
         In caso di errore, restituisce un messaggio di errore con status 500.
     """
@@ -552,11 +561,25 @@ def testing():
             logger.error("Testing fallito: nessun dato disponibile")
             return jsonify({"error": "Testing fallito. Nessun dato disponibile."}), 500
         
+        # Formattazione delle metriche con la nuova struttura
         formatted_metrics = {
-            "accuracy": float(metrics['accuracy']),
-            "precision": float(metrics['precision']),
-            "recall": float(metrics['recall']),
-            "f1_score": float(metrics['f1_score']),
+            "classification": {
+                "accuracy": float(metrics['classification']['accuracy']),
+                "precision": float(metrics['classification']['precision']),
+                "recall": float(metrics['classification']['recall']),
+                "f1_score": float(metrics['classification']['f1_score']),
+                "confusion_matrix": metrics['classification']['confusion_matrix']
+            },
+            "regression": {
+                "mae": float(metrics['regression']['mae']),
+                "mse": float(metrics['regression']['mse']),
+                "rmse": float(metrics['regression']['rmse']),
+                "r2_score": float(metrics['regression']['r2_score']),
+                "mape": float(metrics['regression']['mape'])
+            },
+            "threshold_used": float(metrics['threshold_used']),
+            "dataset_info": metrics.get('dataset_info', {}),
+            "test_records_used": metrics.get('test_records_used', 0)
         }
         
         logger.info(f"Testing completato con successo. {json.dumps(formatted_metrics, indent=2)}")
@@ -820,6 +843,8 @@ def predict_by_digital_twin():
         
         result = float(result)
         
+        prediction_class = classify_prediction(result)
+        
         response = {
             "dt_susceptibility_score": result,
             "model_predictions": {k: float(v) if v is not None else None 
@@ -831,7 +856,8 @@ def predict_by_digital_twin():
                 "last_name": digital_twin['last_name'],
                 "traits": digital_twin['traits'],
                 "last_training_datetime": digital_twin.get('last_training_datetime'),
-                "last_update_datetime": digital_twin.get('last_update_datetime')
+                "last_update_datetime": digital_twin.get('last_update_datetime'),
+                "classification": prediction_class
             }
         }
         
