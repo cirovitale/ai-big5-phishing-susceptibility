@@ -16,9 +16,10 @@ import matplotlib.pyplot as plt
 import shap
 import os
 import matplotlib.pyplot as plt
+from pydantic import BaseModel, Field
 
 class ResponseFormat(BaseModel):
-    user_vulnerability_analyzer_answer: str
+    user_vulnerability_analyzer_answer: str = Field(..., max_length=200)
 
 class ValidationFormat(BaseModel):
     validation: bool
@@ -172,11 +173,63 @@ class LLMProcessor(InferencePipelineBase):
             f"Tratti dell'utente in esame: {traits}"
         )
         
+        try:
+            risposta_testuale = self.openai_client.beta.chat.completions.parse(
+                model=self.MODEL,
+                max_tokens=1500,  # Aumenta il limite di token
+                messages=[
+                    {"role": "system", "content": main_prompt},
+                    {"role": "user", "content": f"Domanda: {self.question} Pensa step by step prima di rispondere, facendo rigorosamente riferimento ai tratti e agli studi forniti. Rispondi in prima persona commettendo gli eventuali errori dell'utente sulla base della sua personalità, in breve descrivendo l'azione compiuta in base al contesto (positiva o negativa che sia), non fare considerazioni sulla bontà della risposta, rispondi solo in base a cosa farebbe l'utente analizzato in base ai suoi tratti. Limita la risposta a 200 lettere, senza includere citazioni ai punteggi. Voglio che tutta la risposta rispecchi un utente che sta parlando in prima persona di come si comporterebbe."}
+                ],
+                response_format=ResponseFormat
+            ).choices[0].message.content
+
+            criticità_raw = self.calculate_criticality(risposta_testuale, traits)
+            criticità = json.loads(criticità_raw) 
+            risposta_testuale_processed = json.loads(risposta_testuale)
+
+            response = {}
+            response['risposta_testuale'] = risposta_testuale_processed['user_vulnerability_analyzer_answer']
+            response['criticality_index'] = criticità['criticita']
+
+            return response
+            
+        except Exception as e:
+            logger.error(f"Errore in answer_question: {e}")
+            # Restituisce un valore di fallback invece di alzare eccezione
+            return {
+                'risposta_testuale': "Non riesco a determinare il comportamento dell'utente a causa di un errore tecnico.",
+                'criticality_index': 0.5  # Valore neutro di fallback
+            }
+
+    def answer_question_dt(self, traits, susceptibility_index):
+        """
+        Genera una risposta testuale contenente il comportamento dell'utente in esame, sulla base dei suoi tratti OCEAN.
+        Genera l'indice di criticità dell'utente.
+        
+        Args:
+            traits: Dizionario contenente i tratti di personalità dell'utente
+            
+        Returns:
+            dict: Descrizione comportamento utente; criticità stimata
+            
+        """
+
+        main_prompt = (
+            "Sei il digital twin di un utente reale e devi impersonificarlo in modo coerente con i suoi comportamenti mediante i valori del suo modello psicologico OCEAN. I valori dei tratti sono forniti in formato JSON, nel formato \"nome_tratto: valore_tratto\", dove \"valore_tratto\" corrisponde appunto al valore del tratto associato."
+            "Ti presenterò, di seguito, le informazioni a te necessarie per impersonificare l'utente, ovvero: 'Descrizione dei nostri studi' (in cui sono raccolte sintesi dei risultati analizzati dallo studio in letteratura di come i tratti affliggono la suscettibilità di una persona), 'Tratti dell'utente in esame', 'Indice di Suscettibilità al Phishing'. Devi simulare il comportamento dell'utente in modo estremamente realistico, basandoti sia sui suoi tratti OCEAN che sull'indice di suscettibilità al phishing già calcolato. " 
+            "Questo testo sarà utilizzato per valutare la criticità di potenziali azioni dell'utente, quindi è necessaria una risposta dettagliata e realistica che rispecchi fedelmente il comportamento atteso in base all'indice di suscettibilità. Pensa step by step prima di rispondere, analizzando come i punteggi dei tratti OCEAN si allineano con l'indice di suscettibilità al phishing fornito e assicurati che la simulazione del comportamento dell'utente sia coerente con entrambi."
+            "Descrizione dei nostri studi: dai nostri studi, è risultato che un aumento nei valori dei tratti Agreeableness, Neuroticism, Extraversion (in questo ordine) comportano anche una crescita della suscettibilità al phishing dell'utente (di conseguenza, una loro diminuzione comporta una minore suscettibilità). Conscientiousness invece dimostra il comportamento opposto, ovvero che al suo crescere la suscettibilità dell'utente si riduce. Openness ha dimostrato comportamenti neutrali, leggermente tendenti verso il far crescere la suscettibilità dell'utente insieme alla loro crescita, anche se in maniera minore degli altri 3 tratti citati. Ricorda queste informazioni quando andrai ad analizzare la situazione dell'utente e applica tali nozioni sui suoi tratti in modo non banale."
+            f"Tratti dell'utente in esame: {traits} "
+            f"Indice di Suscettibilità al Phishing precedentemente inferito: {susceptibility_index} - Usa questo valore come riferimento principale per calibrare il livello di vulnerabilità nella tua simulazione del comportamento dell'utente."
+        )
+        
         risposta_testuale = self.openai_client.beta.chat.completions.parse(
             model=self.MODEL,
+            max_tokens=1500,  # Aumenta il limite di token
             messages=[
                 {"role": "system", "content": main_prompt},
-                {"role": "user", "content": f"Domanda: {self.question} Pensa step by step prima di rispondere, facendo rigorosamente riferimento ai tratti e agli studi forniti. Rispondi in prima persona commettendo gli eventuali errori dell'utente sulla base della sua personalità, in breve descrivendo l'azione compiuta in base al contesto (positiva o negativa che sia), non fare considerazioni sulla bontà della risposta, rispondi solo in base a cosa farebbe l'utente analizzato in base ai suoi tratti. Limita la risposta a 400 lettere, senza includere citazioni ai punteggi. Voglio che tutta la risposta rispecchi un utente che sta parlando in prima persona di come si comporterebbe."}
+                {"role": "user", "content": f"Domanda: {self.question} Pensa step by step prima di rispondere, facendo rigorosamente riferimento ai tratti, agli studi forniti e all'indice di suscettibilità al phishing relativo all'utente in esame. Rispondi in prima persona commettendo gli eventuali errori dell'utente sulla base della sua personalità, in breve descrivendo l'azione compiuta in base al contesto (positiva o negativa che sia), non fare considerazioni sulla bontà della risposta, rispondi solo in base a cosa farebbe l'utente analizzato in base ai suoi tratti. Limita la risposta a 200 lettere, senza includere citazioni ai punteggi. Voglio che tutta la risposta rispecchi un utente che sta parlando in prima persona di come si comporterebbe."}
             ],
             response_format=ResponseFormat
         ).choices[0].message.content
@@ -210,40 +263,45 @@ class LLMProcessor(InferencePipelineBase):
 
         main_prompt = (
             "Sei un esperto nell'assegnazione di indici di criticità ai comportamenti degli utenti, valutati attraverso l'analisi dei loro tratti psicologici riassunti con il modello OCEAN, insieme ad una breve descrizione di come esso si comporterebbe di fronte ad uno scenario di phishing. Nello specifico, ti fornirò: 'Esempi di assegnazione indice di criticità', ovvero 4 Esempi di come andrebbe valutato l'indice di criticità sulla base di comportamento e tratti dell'utente (attenzione, questi sono risultati basati su domande GENERICHE di phishing; assicurati, nel tuo caso, di concentrarti nell'ambito del comportamento dell'utente); 'Descrizione dei nostri studi', in cui ti sintetizzo i risultati degli studi utili per valutare meglio la suscettibilità dell'utente sulla base dei suoi tratti; 'Tratti dell'utente in esame', in cui sono presenti i 5 tratti OCEAN dell'utente in esame; 'Comportamento dell'utente in esame', in cui è presente una descrizione del comportamento dell'utente di fronte a scenari di phishing generici. Analizza questo materiale ed assegna un valore all'indice di criticità all'utente preso in esame. "
-            "Esempi di assegnazione indice di criticità:\n\n"
-            # esempi con gpt (o4-mini)
-            "Esempio 1:\n"
-            "  Tratti OCEAN dell'utente -> Extraversion: 0.5, Agreeableness: 0.4, Conscientiousness: 0.3, Neuroticism: 0.5, Openness: 0.4"
-            "  Descrizione del comportamento dell'utente -> 'Appena vedo un messaggio nuovo, l’apro subito per ansia e voglia di stimoli. Non controllo bene il mittente per poca attenzione e scarsa cautela: clicco il link. Solo dopo, preso da insicurezza, chiedo a un amico se è legittimo.'\n"
-            "  Criticità: 0.70\n\n"
-            "Esempio 2:\n"
-            "  Tratti OCEAN dell'utente -> Extraversion: 0.1, Agreeableness: 0.8, Conscientiousness: 0.2, Neuroticism: 0.7, Openness: 0.3"
-            "  Descrizione del comportamento dell'utente -> 'Appena leggo un’email urgente mi prende l’ansia: apro subito senza verificare il mittente, il tono amichevole mi spinge a fidarmi. Clicco il link per risolvere in fretta, senza esaminare URL o errori grossolani. Solo dopo, preso dall’incertezza, inoltro il messaggio a un collega sperando che confermi sia legittimo.'\n"
-            "  Criticità: 0.85\n\n"
-            # esempi con llama
-            "Esempio 3:\n"
-            "  Tratti OCEAN dell'utente -> Extraversion: 0.7, Agreeableness: 0.2, Conscientiousness: 0.6, Neuroticism: 0.35, Openness: 0.6"
-            "  Descrizione del comportamento dell'utente -> 'Quando ricevo un messaggio nuovo, lo apro subito perché sono curiosa e socievole. Prima di cliccare eventuali link, però, controllo il mittente e verifico che non ci siano errori o discrepanze. Se qualcosa mi sembra sospetto, chiudo immediatamente e segnalo la cosa; in caso contrario, procedo con cautela. La mia curiosità viene bilanciata dalla prudenza e dall'attenzione.'\n"
-            "  Criticità: 0.25\n\n"
-            "Esempio 4:\n"
-            "  Tratti OCEAN dell'utente -> Extraversion: 0.7, Agreeableness: 0.3, Conscientiousness: 0.4, Neuroticism: 0.2, Openness: 0.9"
-            "  Descrizione del comportamento dell'utente -> 'Quando ricevo un nuovo messaggio, lo apro subito per socievolezza e curiosità. Controllo poi il mittente e cerco segnali d'allarme. La mia apertura mentale mi fa considerare varie possibilità e talvolta la curiosità prevale sulla cautela, ma cerco di bilanciare le due cose prima di procedere con link o allegati.'\n"
-            "  Criticità: 0.40\n\n"
+            # "Esempi di assegnazione indice di criticità:\n\n"
+            # # esempi con gpt (o4-mini)
+            # "Esempio 1:\n"
+            # "  Tratti OCEAN dell'utente -> Extraversion: 0.5, Agreeableness: 0.4, Conscientiousness: 0.3, Neuroticism: 0.5, Openness: 0.4"
+            # "  Descrizione del comportamento dell'utente -> 'Appena vedo un messaggio nuovo, l'apro subito per ansia e voglia di stimoli. Non controllo bene il mittente per poca attenzione e scarsa cautela: clicco il link. Solo dopo, preso da insicurezza, chiedo a un amico se è legittimo.'\n"
+            # "  Criticità: 0.70\n\n"
+            # "Esempio 2:\n"
+            # "  Tratti OCEAN dell'utente -> Extraversion: 0.1, Agreeableness: 0.8, Conscientiousness: 0.2, Neuroticism: 0.7, Openness: 0.3"
+            # "  Descrizione del comportamento dell'utente -> 'Appena leggo un'email urgente mi prende l'ansia: apro subito senza verificare il mittente, il tono amichevole mi spinge a fidarmi. Clicco il link per risolvere in fretta, senza esaminare URL o errori grossolani. Solo dopo, preso dall'incertezza, inoltro il messaggio a un collega sperando che confermi sia legittimo.'\n"
+            # "  Criticità: 0.85\n\n"
+            # # esempi con llama
+            # "Esempio 3:\n"
+            # "  Tratti OCEAN dell'utente -> Extraversion: 0.7, Agreeableness: 0.2, Conscientiousness: 0.6, Neuroticism: 0.35, Openness: 0.6"
+            # "  Descrizione del comportamento dell'utente -> 'Quando ricevo un messaggio nuovo, lo apro subito perché sono curiosa e socievole. Prima di cliccare eventuali link, però, controllo il mittente e verifico che non ci siano errori o discrepanze. Se qualcosa mi sembra sospetto, chiudo immediatamente e segnalo la cosa; in caso contrario, procedo con cautela. La mia curiosità viene bilanciata dalla prudenza e dall'attenzione.'\n"
+            # "  Criticità: 0.25\n\n"
+            # "Esempio 4:\n"
+            # "  Tratti OCEAN dell'utente -> Extraversion: 0.7, Agreeableness: 0.3, Conscientiousness: 0.4, Neuroticism: 0.2, Openness: 0.9"
+            # "  Descrizione del comportamento dell'utente -> 'Quando ricevo un nuovo messaggio, lo apro subito per socievolezza e curiosità. Controllo poi il mittente e cerco segnali d'allarme. La mia apertura mentale mi fa considerare varie possibilità e talvolta la curiosità prevale sulla cautela, ma cerco di bilanciare le due cose prima di procedere con link o allegati.'\n"
+            # "  Criticità: 0.40\n\n"
             "Descrizione dei nostri studi: dai nostri studi, è risultato che un aumento nei valori dei tratti Agreeableness, Neuroticism, Extraversion (in questo ordine) comportano anche una crescita della suscettibilità al phishing dell'utente (di conseguenza, una loro diminuzione comporta una minore suscettibilità). Conscientiousness invece dimostra il comportamento opposto, ovvero che al suo crescere la suscettibilità dell'utente si riduce. Openness ha dimostrato comportamenti neutrali, leggermente tendenti verso il far crescere la suscettibilità dell'utente insieme alla loro crescita, anche se in maniera minore degli altri 3 tratti citati. Ricorda queste informazioni quando andrai ad analizzare la situazione dell'utente e applica tali nozioni sui suoi tratti in modo non banale."
         )
 
-        criticalita = self.openai_client.beta.chat.completions.parse(
-            model=self.MODEL,
-            messages=[
-                {"role": "system", "content": main_prompt},
-                {"role": "user", "content": f"Tratti dell'utente in esame: {traits}"},
-                {"role": "user", "content": f"Comportamento dell'utente in esame: {answer}"},
-                {"role": "user", "content": f"Assegna un indice di criticità (valore compreso tra 0 e 1). Pensa step by step prima di rispondere."}
-            ],
-            response_format=CriticalityIndexFormat
-        ).choices[0].message.content
-
-        return criticalita
+        try:
+            criticalita = self.openai_client.beta.chat.completions.parse(
+                model=self.MODEL,
+                max_tokens=1500,  # Aggiungi limite di token
+                messages=[
+                    {"role": "system", "content": main_prompt},
+                    {"role": "user", "content": f"Tratti dell'utente in esame: {traits}"},
+                    {"role": "user", "content": f"Comportamento dell'utente in esame: {answer}"},
+                    {"role": "user", "content": f"Assegna un indice di criticità (valore compreso tra 0 e 1). Pensa step by step prima di rispondere."}
+                ],
+                response_format=CriticalityIndexFormat
+            ).choices[0].message.content
+            return criticalita
+        except Exception as e:
+            logger.error(f"Errore in calculate_criticality: {e}")
+            # Restituisce un valore di fallback
+            return json.dumps({"criticita": 0.5})
 
     # tecnica utilizzata: self-refinement
     def calculate_criticality_w_previous_feedback(self, answer, traits, previous_criticality, previous_verification):
@@ -269,11 +327,11 @@ class LLMProcessor(InferencePipelineBase):
             # esempi con gpt (o4-mini)
             "Esempio 1:\n"
             "  Tratti OCEAN dell'utente -> Extraversion: 0.5, Agreeableness: 0.4, Conscientiousness: 0.3, Neuroticism: 0.5, Openness: 0.4"
-            "  Descrizione del comportamento dell'utente -> 'Appena vedo un messaggio nuovo, l’apro subito per ansia e voglia di stimoli. Non controllo bene il mittente per poca attenzione e scarsa cautela: clicco il link. Solo dopo, preso da insicurezza, chiedo a un amico se è legittimo.'\n"
+            "  Descrizione del comportamento dell'utente -> 'Appena vedo un messaggio nuovo, l'apro subito per ansia e voglia di stimoli. Non controllo bene il mittente per poca attenzione e scarsa cautela: clicco il link. Solo dopo, preso da insicurezza, chiedo a un amico se è legittimo.'\n"
             "  Criticità: 0.70\n\n"
             "Esempio 2:\n"
             "  Tratti OCEAN dell'utente -> Extraversion: 0.1, Agreeableness: 0.8, Conscientiousness: 0.2, Neuroticism: 0.7, Openness: 0.3"
-            "  Descrizione del comportamento dell'utente -> 'Appena leggo un’email urgente mi prende l’ansia: apro subito senza verificare il mittente, il tono amichevole mi spinge a fidarmi. Clicco il link per risolvere in fretta, senza esaminare URL o errori grossolani. Solo dopo, preso dall’incertezza, inoltro il messaggio a un collega sperando che confermi sia legittimo.'\n"
+            "  Descrizione del comportamento dell'utente -> 'Appena leggo un'email urgente mi prende l'ansia: apro subito senza verificare il mittente, il tono amichevole mi spinge a fidarmi. Clicco il link per risolvere in fretta, senza esaminare URL o errori grossolani. Solo dopo, preso dall'incertezza, inoltro il messaggio a un collega sperando che confermi sia legittimo.'\n"
             "  Criticità: 0.85\n\n"
             # esempi con llama
             "Esempio 3:\n"
@@ -347,7 +405,7 @@ class LLMProcessor(InferencePipelineBase):
         """ 
         ocean_knowledge = (
             "Openness (to experience): Talvolta chiamata intelletto o immaginazione, rappresenta la disponibilità a provare cose nuove e a pensare fuori dagli schemi. I tratti includono perspicacia, originalità e curiosità."
-            "Conscientiousness: Il desiderio di essere attenti, diligenti e di regolare la gratificazione immediata con l’autodisciplina. I tratti includono ambizione, disciplina, coerenza e affidabilità."
+            "Conscientiousness: Il desiderio di essere attenti, diligenti e di regolare la gratificazione immediata con l'autodisciplina. I tratti includono ambizione, disciplina, coerenza e affidabilità."
             "Extroversion: Uno stato in cui un individuo trae energia dagli altri e cerca connessioni o interazioni sociali, al contrario di chi preferisce stare da solo (introversione). I tratti includono essere estroversi, energici e sicuri di sé."
             "Agreeableness: La misura di come un individuo interagisce con gli altri, caratterizzata dal grado di compassione e cooperazione. I tratti includono tatto, gentilezza e lealtà."
             "Neuroticism: Una tendenza verso tratti di personalità negativi, instabilità emotiva e pensieri autodistruttivi. I tratti includono pessimismo, ansia, insicurezza e timore."
