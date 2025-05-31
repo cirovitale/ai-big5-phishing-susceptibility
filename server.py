@@ -175,7 +175,7 @@ def execute_inference_pipeline(query_traits, sel_question):
         sel_question: Domanda da utilizzare per il LLM 
         
     Returns:
-        tuple: (float, dict) - Valore finale calcolato dall'ensemble e predizioni dei singoli modelli
+        tuple: (float, dict, str) - Valore finale calcolato dall'ensemble, predizioni dei singoli modelli, comportamento predetto
         
     Raises:
         Exception: Se si verificano errori durante l'inferenza
@@ -184,7 +184,7 @@ def execute_inference_pipeline(query_traits, sel_question):
 
     predictions = {}
     question = sel_question
-    predicted_behaviour = None
+    predicted_behaviour = "Comportamento non disponibile"  # Valore di default
     
     # KNN
     if ENSEMBLE_WEIGHT_KNN > 0:
@@ -229,6 +229,7 @@ def execute_inference_pipeline(query_traits, sel_question):
         except Exception as e:
             logger.error(f"Errore durante l'inferenza LLM: {e}", exc_info=True)
             predictions['LLM'] = None
+            predicted_behaviour = "Errore durante la predizione del comportamento"
     
     # DL
     if ENSEMBLE_WEIGHT_DL > 0:
@@ -259,7 +260,8 @@ def execute_inference_pipeline(query_traits, sel_question):
         return final_result, predictions, predicted_behaviour
     except Exception as e:
         logger.error(f"Errore durante il calcolo dell'ensemble: {e}", exc_info=True)
-        return 0, predictions
+        # Restituisce sempre 3 valori, anche in caso di errore
+        return 0.5, predictions, predicted_behaviour
 
 def execute_testing_pipeline(sel_question):
     """
@@ -453,14 +455,11 @@ def predict():
         
         result = float(result)
         
-        prediction_class = classify_prediction(result)
-        
         response = {
             "dt_susceptibility_score": result,
             "dt_response": predicted_behaviour,
             "model_predictions": {k: float(v) if v is not None else None 
-                                for k, v in model_predictions.items()},
-            "classification": prediction_class
+                                for k, v in model_predictions.items()}
         }
         
         if 'cf' in data:
@@ -843,8 +842,6 @@ def predict_by_digital_twin():
         
         result = float(result)
         
-        prediction_class = classify_prediction(result)
-        
         response = {
             "dt_susceptibility_score": result,
             "model_predictions": {k: float(v) if v is not None else None 
@@ -856,8 +853,7 @@ def predict_by_digital_twin():
                 "last_name": digital_twin['last_name'],
                 "traits": digital_twin['traits'],
                 "last_training_datetime": digital_twin.get('last_training_datetime'),
-                "last_update_datetime": digital_twin.get('last_update_datetime'),
-                "classification": prediction_class
+                "last_update_datetime": digital_twin.get('last_update_datetime')
             }
         }
         
