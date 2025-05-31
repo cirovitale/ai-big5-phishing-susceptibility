@@ -236,7 +236,7 @@ class DLProcessor(InferencePipelineBase):
             logger.error(f"Errore durante l'addestramento del modello DL: {e}")
             raise
     
-    def process(self, traits):
+    def process(self, traits, explain=False):
         """
         Predice l'indice di criticità di un utente in base ai suoi tratti di personalità (OCEAN).
         
@@ -273,7 +273,7 @@ class DLProcessor(InferencePipelineBase):
             logger.info(f"Processo DL completato. Indice di criticità stimato: {prediction:.4f}")
 
             # Explanation con SHAP se i dati di addestramento sono disponibili
-            if self.data is not None:
+            if explain and self.data is not None:
                 try:
                     explanation = self.explain(traits)
                     logger.info(f"Baseline: {explanation['expected_value']:.4f}, Predizione: {explanation['predicted_value']:.4f}")
