@@ -21,8 +21,9 @@ from pydantic import BaseModel, Field
 class ResponseFormat(BaseModel):
     user_vulnerability_analyzer_answer: str = Field(..., max_length=200)
 
-class ValidationFormat(BaseModel):
+class ReasoningAndValidationFormat(BaseModel):
     validation: bool
+    reasoning: str
 
 class CriticalityIndexFormat(BaseModel):
     criticita: float = confloat(ge=0.0, le=1.0)
@@ -417,9 +418,11 @@ class LLMProcessor(InferencePipelineBase):
             "Descrizione dei nostri studi: dai nostri studi, è risultato che un aumento nei valori dei tratti Agreeableness, Neuroticism, Extraversion (in questo ordine) comportano anche una crescita della suscettibilità al phishing dell'utente (di conseguenza, una loro diminuzione comporta una minore suscettibilità). Conscientiousness invece dimostra il comportamento opposto, ovvero che al suo crescere la suscettibilità dell'utente si riduce. Openness ha dimostrato comportamenti neutrali, leggermente tendenti verso il far crescere la suscettibilità dell'utente insieme alla loro crescita, anche se in maniera minore degli altri 3 tratti citati. Ricorda queste informazioni quando andrai ad analizzare la situazione dell'utente e applica tali nozioni sui suoi tratti in modo non banale."
             "Il tuo compito è valutare solo se l'indice è COERENTE con i tratti dell'utente." 
             "Restituisci 'true' se la risposta rispecchia i tratti psicologici dell'utente, 'false' se la risposta è incoerente con essi. Pensa step by step prima di rispondere, fornendo una lista in cui ogni punto è uno dei 5 tratti OCEAN, con relativa spiegazione, punteggio dell'utente e perchè questo possa influenzare in positivo o negativo l'indice di criticità finale anche sulla base dei nostri studi di cui ti ho accennato. Se rilevi che la criticità assegnata è lontana dalla realtà, resituisci 'false'. Sii molto critico in questo."
+            "\n\nIMPORTANTE: Fornisci la tua risposta in formato JSON con i campi 'validation' (true/false) e 'reasoning' (spiegazione dettagliata del tuo ragionamento step-by-step)."
         )
 
-        veridicità = self.openai_client.beta.chat.completions.parse(
+        # restituisce sia veridicità che spiegazione
+        full_response = self.openai_client.beta.chat.completions.parse(
             model=self.MODEL,
             messages=[
                 {"role": "system", "content": main_prompt},
@@ -427,127 +430,118 @@ class LLMProcessor(InferencePipelineBase):
                 {"role": "user", "content": f"Indice di criticità stimato: {estimated_criticality}"},
                 {"role": "user", "content": f"Valuta SOLO la coerenza dei tratti con il comportamento storico dell'utente."}
             ],
-            response_format=ValidationFormat
-        ).choices[0].message.content
+            response_format=ReasoningAndValidationFormat
+        ).choices[0].message.parsed
 
-        # per capire se e perchè dà falso alla veridicità (serve per il self-refinement)
-        reason_veridicita = self.openai_client.beta.chat.completions.parse(
-            model=self.MODEL,
-            messages=[
-                {"role": "system", "content": main_prompt},
-                {"role": "user", "content": f"Tratti dell'utente: {traits}"},
-                {"role": "user", "content": f"Indice di criticità stimato: {estimated_criticality}"},
-                {"role": "user", "content": f"Hai valutato questa risposta come {veridicità}. Come mai? Spiega il tuo ragionamento."}
-            ],
-        ).choices[0].message.content
-
+        veridicita = "true" if full_response.validation else "false"
+        reason_veridicita = full_response.reasoning
+        
         response = {}
-        response['veridicita'] = veridicità
+        response['veridicita'] = veridicita
         response['reason_veridicita'] = reason_veridicita
 
         return response       
 
 
-
-    def shap_implementation(self, traits: dict, nsamples: int = 10):
-        """
-        Predice l'indice di criticità di un utente in base ai suoi tratti di personalità (OCEAN).
+    # def shap_implementation(self, traits: dict, nsamples: int = 10):
+    #     """
+    #     Predice l'indice di criticità di un utente in base ai suoi tratti di personalità (OCEAN).
         
-        Args:
-            traits: Dizionario contenente i tratti di personalità dell'utente
-            nsamples: quanti sample creare (perturbazione) per allenare SHAP
+    #     Args:
+    #         traits: Dizionario contenente i tratti di personalità dell'utente
+    #         nsamples: quanti sample creare (perturbazione) per allenare SHAP
             
-        Returns:
-            dict: spiegazione mediante SHAP dell'utente e i suoi tratti
+    #     Returns:
+    #         dict: spiegazione mediante SHAP dell'utente e i suoi tratti
             
-        """
+    #     """
 
-        feature_names = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
-        baseline = np.array([0.5] * len(feature_names)).reshape(1, -1)
+    #     feature_names = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
+    #     baseline = np.array([0.5] * len(feature_names)).reshape(1, -1)
 
-        def f(X: np.ndarray) -> np.ndarray:
-            results = []
-            for row in X:
-                t = dict(zip(feature_names, row.tolist()))
-                key = tuple(t.values())
-                if key in self.llm_cache:
-                    resp = self.llm_cache[key]
-                else:
-                    resp = self.answer_question(t)
-                    self.llm_cache[key] = resp
-                results.append(resp['criticality_index'])
-            return np.array(results)
+    #     def f(X: np.ndarray) -> np.ndarray:
+    #         results = []
+    #         for row in X:
+    #             t = dict(zip(feature_names, row.tolist()))
+    #             key = tuple(t.values())
+    #             if key in self.llm_cache:
+    #                 resp = self.llm_cache[key]
+    #             else:
+    #                 resp = self.answer_question(t)
+    #                 self.llm_cache[key] = resp
+    #             results.append(resp['criticality_index'])
+    #         return np.array(results)
 
-        explainer = shap.KernelExplainer(f, baseline)
-        x = np.array([traits[k] for k in feature_names]).reshape(1, -1)
-        shap_values = explainer.shap_values(x, nsamples=nsamples)
-        shap_arr = np.array(shap_values).reshape(-1)
-        self._shap_explainer = explainer
-        self._shap_input = x
-        return dict(zip(feature_names, shap_arr.tolist()))
-
-
-    def plot_shap_waterfall(self):
-        """
-        Visualizza un waterfall plot SHAP per l'ultimo input calcolato.
-        """
-        if not hasattr(self, '_shap_explainer') or not hasattr(self, '_shap_input'):
-            raise RuntimeError("Esegui prima shap_implementation per popolare explainer e input.")
-        feature_names = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
-        exp = shap.Explanation(
-            values=self._shap_explainer.shap_values(self._shap_input, nsamples=10)[0], 
-            base_values=self._shap_explainer.expected_value,
-            data=self._shap_input[0],
-            feature_names=feature_names
-        )
-        fig = plt.figure() 
-
-        shap.plots._waterfall.waterfall_legacy(
-            exp.base_values,
-            exp.values,
-            feature_names=exp.feature_names
-        )
-
-        chart_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "chart"))
-        os.makedirs(chart_dir, exist_ok=True)
-        path = os.path.join(chart_dir, "shap_waterfall_llm.png")
-        fig.savefig(path, bbox_inches="tight")
-        plt.close(fig)
+    #     explainer = shap.KernelExplainer(f, baseline)
+    #     x = np.array([traits[k] for k in feature_names]).reshape(1, -1)
+    #     shap_values = explainer.shap_values(x, nsamples=nsamples)
+    #     shap_arr = np.array(shap_values).reshape(-1)
+    #     self._shap_explainer = explainer
+    #     self._shap_input = x
+    #     return dict(zip(feature_names, shap_arr.tolist()))
 
 
-    def plot_shap_summary_global(self, traits_list: list):
-        """
-        Effettua una explanation globale di LLM mediante SHAP
-        Args:
-            traits_list: Dizionario contenente i tratti di personalità degli utenti necessari per l'explanation
-        """
-        traits_list = traits_list[:10]
+    # def plot_shap_waterfall(self):
+    #     """
+    #     Visualizza un waterfall plot SHAP per l'ultimo input calcolato.
+    #     """
+    #     if not hasattr(self, '_shap_explainer') or not hasattr(self, '_shap_input'):
+    #         raise RuntimeError("Esegui prima shap_implementation per popolare explainer e input.")
+    #     feature_names = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
+    #     exp = shap.Explanation(
+    #         values=self._shap_explainer.shap_values(self._shap_input, nsamples=10)[0], 
+    #         base_values=self._shap_explainer.expected_value,
+    #         data=self._shap_input[0],
+    #         feature_names=feature_names
+    #     )
+    #     fig = plt.figure() 
 
-        feature_names = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
-        baseline = np.array([0.5] * len(feature_names)).reshape(1, -1)
+    #     shap.plots._waterfall.waterfall_legacy(
+    #         exp.base_values,
+    #         exp.values,
+    #         feature_names=exp.feature_names
+    #     )
 
-        def f(X):
-            results = []
-            for row in X:
-                t = dict(zip(feature_names, row.tolist()))
-                key = tuple(t.values())
-                if key in self.llm_cache:
-                    resp = self.llm_cache[key]
-                else:
-                    resp = self.answer_question(t)
-                    self.llm_cache[key] = resp
-                results.append(resp['criticality_index'])
-            return np.array(results)
+    #     chart_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "chart"))
+    #     os.makedirs(chart_dir, exist_ok=True)
+    #     path = os.path.join(chart_dir, "shap_waterfall_llm.png")
+    #     fig.savefig(path, bbox_inches="tight")
+    #     plt.close(fig)
 
-        explainer = shap.KernelExplainer(f, baseline)
-        X = np.array(traits_list)
-        shap_values = explainer.shap_values(X, nsamples=10)
 
-        chart_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "chart"))
-        os.makedirs(chart_dir, exist_ok=True)
-        path = os.path.join(chart_dir, "shap_summary_llm.png")
+    # def plot_shap_summary_global(self, traits_list: list):
+    #     """
+    #     Effettua una explanation globale di LLM mediante SHAP
+    #     Args:
+    #         traits_list: Dizionario contenente i tratti di personalità degli utenti necessari per l'explanation
+    #     """
+    #     traits_list = traits_list[:10]
 
-        shap.summary_plot(shap_values, X, feature_names=feature_names, show=False)
-        plt.savefig(path, bbox_inches='tight')
-        plt.close()
+    #     feature_names = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
+    #     baseline = np.array([0.5] * len(feature_names)).reshape(1, -1)
+
+    #     def f(X):
+    #         results = []
+    #         for row in X:
+    #             t = dict(zip(feature_names, row.tolist()))
+    #             key = tuple(t.values())
+    #             if key in self.llm_cache:
+    #                 resp = self.llm_cache[key]
+    #             else:
+    #                 resp = self.answer_question(t)
+    #                 self.llm_cache[key] = resp
+    #             results.append(resp['criticality_index'])
+    #         return np.array(results)
+
+    #     explainer = shap.KernelExplainer(f, baseline)
+    #     X = np.array(traits_list)
+    #     shap_values = explainer.shap_values(X, nsamples=10)
+
+    #     chart_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "chart"))
+    #     os.makedirs(chart_dir, exist_ok=True)
+    #     path = os.path.join(chart_dir, "shap_summary_llm.png")
+
+    #     shap.summary_plot(shap_values, X, feature_names=feature_names, show=False)
+    #     plt.savefig(path, bbox_inches='tight')
+    #     plt.close()
 
